@@ -35,6 +35,14 @@ let controller: AbortController | null = null;
 let token = 0;
 let healthProbe: Promise<void> | null = null;
 
+/**
+ * The element currently playing, if any. Voice mode taps it with a Web Audio
+ * analyser so its visual can follow the actual speech level.
+ */
+export function getTtsAudioElement(): HTMLAudioElement | null {
+  return audio;
+}
+
 /** Only a stream ending in the active conversation may trigger autoplay. */
 export function shouldAutoplayFinishedReply(
   previousStreamingConversationId: string | null,
