@@ -15,6 +15,7 @@ import { MicButton } from './MicButton';
 // Three.js only loads when voice mode is first opened.
 const VoiceMode = lazy(() => import('../Voice/VoiceMode'));
 import { useSpeech } from '../../hooks/useSpeech';
+import { unlockAudio } from '../../lib/tts';
 import type {
   ChatMessage,
   MessageTelemetry,
@@ -646,7 +647,11 @@ export function InputArea() {
             />
             <button
               type="button"
-              onClick={() => setVoiceOpen(true)}
+              onClick={() => {
+                // Inside the tap: lets iOS play replies and run the mic analyser.
+                unlockAudio();
+                setVoiceOpen(true);
+              }}
               disabled={voiceDisabled}
               title={speechAvailable ? 'Voice mode (hands-free conversation)' : 'Voice mode needs a speech-to-text backend'}
               aria-label="Open voice mode"

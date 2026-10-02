@@ -4,7 +4,7 @@ import { Mic, MicOff, X } from 'lucide-react';
 import { ParticleOrb, type OrbMode } from './ParticleOrb';
 import { transcribeAudio } from '../../lib/api';
 import { useAppStore } from '../../lib/store';
-import { getTtsAudioElement, useTtsStore } from '../../lib/tts';
+import { getAudioContext, getTtsLevel, useTtsStore } from '../../lib/tts';
 import { toSpeakableText } from '../../lib/message-text';
 import { VoiceActivityDetector, isMeaningfulTranscript, rmsLevel } from '../../lib/vad';
 import { audioDiag, audioDiagError, audioDiagOk } from '../../lib/audio-diag';
@@ -70,11 +70,8 @@ export default function VoiceMode({ onSend, onClose }: VoiceModeProps) {
   const phaseRef = useRef<Phase>('starting');
   const closedRef = useRef(false);
   const levelRef = useRef(0);
-  const ctxRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const micAnalyserRef = useRef<AnalyserNode | null>(null);
-  const ttsAnalyserRef = useRef<AnalyserNode | null>(null);
-  const tappedElementRef = useRef<HTMLAudioElement | null>(null);
+  const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const recorderStartedRef = useRef(0);
@@ -208,7 +205,6 @@ export default function VoiceMode({ onSend, onClose }: VoiceModeProps) {
     closedRef.current = false;
     let raf = 0;
     const micBuf = new Float32Array(1024);
-    const ttsBuf = new Float32Array(1024);
 
     (async () => {
       let stream: MediaStream;
@@ -229,22 +225,26 @@ export default function VoiceMode({ onSend, onClose }: VoiceModeProps) {
       }
       streamRef.current = stream;
 
-      const ctx = new AudioContext();
-      ctxRef.current = ctx;
+      // The shared context was created and resumed by the tap that opened voice
+      // mode; one created here, after awaiting the mic, can stay suspended on
+      // iOS and the analyser would read silence forever.
+      const ctx = getAudioContext();
+      if (!ctx) {
+        setNotice('This browser has no Web Audio support, so voice mode cannot listen.');
+        setPhase('error');
+        return;
+      }
       await ctx.resume().then(
         () => audioDiagOk(`AudioContext.resume() estado=${ctx.state}`),
         (err) => audioDiagError('AudioContext.resume()', err),
       );
       ctx.onstatechange = () => audioDiag(`AudioContext estado=${ctx.state}`);
+      if (closedRef.current) return;
       const micAnalyser = ctx.createAnalyser();
       micAnalyser.fftSize = 1024;
-      ctx.createMediaStreamSource(stream).connect(micAnalyser);
-      micAnalyserRef.current = micAnalyser;
-
-      const ttsAnalyser = ctx.createAnalyser();
-      ttsAnalyser.fftSize = 1024;
-      ttsAnalyser.connect(ctx.destination);
-      ttsAnalyserRef.current = ttsAnalyser;
+      const micSource = ctx.createMediaStreamSource(stream);
+      micSource.connect(micAnalyser);
+      micSourceRef.current = micSource;
 
       startListening();
 
@@ -271,24 +271,13 @@ export default function VoiceMode({ onSend, onClose }: VoiceModeProps) {
             recorderStartedRef.current = now;
           }
         } else if (current === 'speaking') {
-          // Route the reply's <audio> through our analyser once per utterance.
-          // Only while the context runs: a suspended context would mute it.
-          const el = getTtsAudioElement();
-          if (el && el !== tappedElementRef.current && ctx.state === 'running') {
-            try {
-              ctx.createMediaElementSource(el).connect(ttsAnalyser);
-              audioDiag('áudio da resposta roteado pelo AudioContext');
-            } catch {
-              // Already routed elsewhere; the synthetic envelope below covers it.
-            }
-            tappedElementRef.current = el;
-          }
-          if (el && el === tappedElementRef.current) {
-            ttsAnalyser.getFloatTimeDomainData(ttsBuf);
-            levelRef.current = Math.min(1, rmsLevel(ttsBuf) * LEVEL_GAIN);
-          } else {
-            levelRef.current = 0.3 + 0.2 * Math.sin(now / 90) * Math.sin(now / 230);
-          }
+          // The reply plays straight from its <audio> element (never routed
+          // through Web Audio, which could mute it); its level comes from the
+          // decoded WAV at the current playback position.
+          const ttsLevel = getTtsLevel();
+          levelRef.current = ttsLevel !== null
+            ? Math.min(1, ttsLevel * LEVEL_GAIN)
+            : 0.3 + 0.2 * Math.sin(now / 90) * Math.sin(now / 230);
         } else {
           levelRef.current = 0;
         }
@@ -304,11 +293,12 @@ export default function VoiceMode({ onSend, onClose }: VoiceModeProps) {
       if (recorder && recorder.state !== 'inactive') recorder.stop();
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
-      // A reply routed through this context would go silent once it closes.
+      // Closing voice mode ends the reply it started.
       const tts = useTtsStore.getState();
       if (spokenIdRef.current && tts.speakingId === spokenIdRef.current) tts.stop();
-      void ctxRef.current?.close().catch(() => {});
-      ctxRef.current = null;
+      // The context is app-wide and stays unlocked; only detach the microphone.
+      micSourceRef.current?.disconnect();
+      micSourceRef.current = null;
     };
     // The session is set up once; handlers read live state through refs.
   }, []);

@@ -6,7 +6,13 @@ vi.mock('./api', () => ({
 }));
 
 import { synthesizeSpeech, fetchTtsHealth } from './api';
-import { useTtsStore, __resetTtsForTests, shouldAutoplayFinishedReply } from './tts';
+import {
+  useTtsStore,
+  __resetTtsForTests,
+  getAudioContext,
+  shouldAutoplayFinishedReply,
+  unlockAudio,
+} from './tts';
 
 const synth = vi.mocked(synthesizeSpeech);
 const health = vi.mocked(fetchTtsHealth);
@@ -14,25 +20,42 @@ const health = vi.mocked(fetchTtsHealth);
 /** Minimal HTMLAudioElement stand-in; jsdom cannot decode or play real audio. */
 class FakeAudio {
   static instances: FakeAudio[] = [];
+  /** Next play() results; empty means resolve. */
+  static playResults: Array<() => Promise<void>> = [];
   onended: (() => void) | null = null;
   onerror: (() => void) | null = null;
   src: string;
-  paused = false;
+  preload = '';
+  currentTime = 0;
+  paused = true;
   playCalls = 0;
+  pauseCalls = 0;
+  playedSrcs: string[] = [];
 
-  constructor(src: string) {
+  constructor(src = '') {
     this.src = src;
     FakeAudio.instances.push(this);
   }
 
   play(): Promise<void> {
     this.playCalls += 1;
+    this.playedSrcs.push(this.src);
+    const next = FakeAudio.playResults.shift();
+    if (next) return next();
+    this.paused = false;
     return Promise.resolve();
   }
 
   pause(): void {
+    this.pauseCalls += 1;
     this.paused = true;
   }
+
+  removeAttribute(name: string): void {
+    if (name === 'src') this.src = '';
+  }
+
+  load(): void {}
 }
 
 const created: string[] = [];
@@ -41,6 +64,9 @@ let urlCounter = 0;
 
 beforeEach(() => {
   vi.stubGlobal('Audio', FakeAudio as unknown as typeof Audio);
+  // Tests run under node: a bare EventTarget stands in for document so the
+  // tap-to-unlock listeners (re)installed by the reset below can be driven.
+  vi.stubGlobal('document', new EventTarget());
   vi.stubGlobal('URL', {
     createObjectURL: () => {
       const url = `blob:fake/${++urlCounter}`;
@@ -60,6 +86,7 @@ beforeEach(() => {
   // keeps that bookkeeping out of this test's assertions.
   __resetTtsForTests();
   FakeAudio.instances = [];
+  FakeAudio.playResults = [];
   created.length = 0;
   revoked.length = 0;
   urlCounter = 0;
@@ -95,11 +122,15 @@ describe('shared voice output', () => {
     synth.mockResolvedValue(new Blob(['wav']));
 
     await useTtsStore.getState().speak('m1', 'Erste');
-    const first = FakeAudio.instances[0];
+    const el = FakeAudio.instances[0];
+    const pausesBefore = el.pauseCalls;
 
     await useTtsStore.getState().speak('m2', 'Zweite');
 
-    expect(first.paused).toBe(true);
+    // Same (unlocked) element, paused and handed the new utterance.
+    expect(FakeAudio.instances).toHaveLength(1);
+    expect(el.pauseCalls).toBeGreaterThan(pausesBefore);
+    expect(el.playedSrcs).toEqual([created[0], created[1]]);
     expect(useTtsStore.getState().speakingId).toBe('m2');
     expect(revoked).toContain(created[0]);
   });
@@ -250,5 +281,94 @@ describe('autoplay gating', () => {
     expect(
       shouldAutoplayFinishedReply('chat-1', 'chat-2', true, { role: 'assistant', id: 'old' }, null),
     ).toBe(false);
+  });
+});
+
+describe('iOS audio unlock', () => {
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it('a tap primes the same element that later plays the reply', async () => {
+    synth.mockResolvedValue(new Blob(['wav']));
+
+    document.dispatchEvent(new Event('touchend'));
+    await flush();
+    await useTtsStore.getState().speak('m1', 'Olá');
+
+    expect(FakeAudio.instances).toHaveLength(1);
+    const [primer, reply] = FakeAudio.instances[0].playedSrcs;
+    expect(primer.startsWith('data:audio/wav;base64,')).toBe(true);
+    expect(reply).toBe(created[0]);
+  });
+
+  it('stops listening for taps once unlocked', async () => {
+    document.dispatchEvent(new Event('touchend'));
+    await flush();
+    document.dispatchEvent(new Event('click'));
+    await flush();
+
+    expect(FakeAudio.instances[0].playCalls).toBe(1);
+  });
+
+  it('keeps listening after a rejected unlock', async () => {
+    FakeAudio.playResults = [
+      () => Promise.reject(new DOMException('blocked', 'NotAllowedError')),
+    ];
+
+    document.dispatchEvent(new Event('touchend'));
+    await flush();
+    document.dispatchEvent(new Event('touchend'));
+    await flush();
+
+    expect(FakeAudio.instances[0].playCalls).toBe(2);
+  });
+
+  it('never interrupts a reply that is already playing', async () => {
+    synth.mockResolvedValue(new Blob(['wav']));
+    await useTtsStore.getState().speak('m1', 'Olá');
+    const el = FakeAudio.instances[0];
+
+    unlockAudio();
+
+    expect(el.playCalls).toBe(1);
+    expect(el.paused).toBe(false);
+  });
+
+  it('a slow primer does not pause a reply that took the element over', async () => {
+    synth.mockResolvedValue(new Blob(['wav']));
+    let finishPrimer!: () => void;
+    FakeAudio.playResults = [
+      () => new Promise<void>((resolve) => {
+        finishPrimer = resolve;
+      }),
+    ];
+
+    unlockAudio();
+    await useTtsStore.getState().speak('m1', 'Olá');
+    const el = FakeAudio.instances[0];
+    const pauses = el.pauseCalls;
+    finishPrimer();
+    await flush();
+
+    expect(el.pauseCalls).toBe(pauses);
+    expect(useTtsStore.getState().speakingId).toBe('m1');
+  });
+
+  it('creates one shared AudioContext and resumes it inside the tap', () => {
+    const resume = vi.fn(() => Promise.resolve());
+    class FakeAudioContext {
+      static count = 0;
+      state = 'suspended';
+      resume = resume;
+      constructor() {
+        FakeAudioContext.count += 1;
+      }
+    }
+    vi.stubGlobal('window', { AudioContext: FakeAudioContext });
+
+    unlockAudio();
+
+    expect(resume).toHaveBeenCalledTimes(1);
+    expect(getAudioContext()).toBe(getAudioContext());
+    expect(FakeAudioContext.count).toBe(1);
   });
 });

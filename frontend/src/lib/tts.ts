@@ -37,11 +37,152 @@ let token = 0;
 let healthProbe: Promise<void> | null = null;
 
 /**
- * The element currently playing, if any. Voice mode taps it with a Web Audio
- * analyser so its visual can follow the actual speech level.
+ * One <audio> element for the whole app, reused for every utterance. iOS
+ * Safari only lets an element play without a fresh tap once a tap has started
+ * it; a reply is synthesized seconds after the tap, so a new element per
+ * utterance is rejected with NotAllowedError. `unlockAudio()` primes this one.
  */
-export function getTtsAudioElement(): HTMLAudioElement | null {
-  return audio;
+let player: HTMLAudioElement | null = null;
+let unlocked = false;
+let audioContext: AudioContext | null = null;
+
+function getPlayer(): HTMLAudioElement {
+  if (!player) {
+    player = new Audio();
+    player.preload = 'auto';
+  }
+  return player;
+}
+
+/** 50 ms of 16-bit mono silence, built synchronously so it fits in a tap. */
+function silentWavUri(): string {
+  const samples = 400;
+  const bytes = new Uint8Array(44 + samples * 2);
+  const view = new DataView(bytes.buffer);
+  const ascii = (offset: number, text: string) => {
+    for (let i = 0; i < text.length; i++) bytes[offset + i] = text.charCodeAt(i);
+  };
+  ascii(0, 'RIFF');
+  view.setUint32(4, 36 + samples * 2, true);
+  ascii(8, 'WAVE');
+  ascii(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, 1, true); // mono
+  view.setUint32(24, 8000, true);
+  view.setUint32(28, 16000, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  ascii(36, 'data');
+  view.setUint32(40, samples * 2, true);
+  let binary = '';
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return `data:audio/wav;base64,${btoa(binary)}`;
+}
+
+let silentUri: string | null = null;
+
+/**
+ * The app-wide AudioContext, created and resumed inside a tap so iOS starts it
+ * running. Voice mode reads the microphone level through it; a context created
+ * later (after awaiting the mic permission) can stay suspended and read zeros.
+ */
+export function getAudioContext(): AudioContext | null {
+  if (!audioContext) {
+    const Ctor = typeof window !== 'undefined' ? window.AudioContext : undefined;
+    if (!Ctor) return null;
+    audioContext = new Ctor();
+  }
+  return audioContext;
+}
+
+/**
+ * Prime the shared player and AudioContext. Must run synchronously inside a
+ * user gesture (touchend/click/keydown); calling it again is cheap.
+ */
+export function unlockAudio(): void {
+  const ctx = getAudioContext();
+  if (ctx && ctx.state !== 'running') {
+    ctx.resume().then(
+      () => audioDiagOk(`AudioContext.resume() no toque, estado=${ctx.state}`),
+      (err) => audioDiagError('AudioContext.resume() no toque', err),
+    );
+  }
+  // Never interrupt a real utterance to play the silent primer.
+  if (unlocked || audio) return;
+  const el = getPlayer();
+  silentUri ??= silentWavUri();
+  el.src = silentUri;
+  const started = el.play();
+  Promise.resolve(started).then(
+    () => {
+      unlocked = true;
+      removeUnlockListeners();
+      audioDiagOk('desbloqueio do áudio');
+      // speak() may have taken the element over while the primer started.
+      if (!audio && el.src === silentUri) el.pause();
+    },
+    (err) => audioDiagError('desbloqueio do áudio', err),
+  );
+}
+
+const UNLOCK_EVENTS = ['touchend', 'pointerup', 'click', 'keydown'] as const;
+
+function onUnlockGesture(): void {
+  unlockAudio();
+}
+
+function removeUnlockListeners(): void {
+  if (typeof document === 'undefined') return;
+  for (const name of UNLOCK_EVENTS) {
+    document.removeEventListener(name, onUnlockGesture, true);
+  }
+}
+
+function installUnlockListeners(): void {
+  if (typeof document === 'undefined') return;
+  for (const name of UNLOCK_EVENTS) {
+    document.addEventListener(name, onUnlockGesture, true);
+  }
+}
+
+installUnlockListeners();
+
+/**
+ * Speech level of the current utterance, 0..1-ish RMS per 20 ms frame, decoded
+ * from the WAV itself so the playing element never has to be routed through
+ * Web Audio (a MediaElementSource is permanent, mutes the element whenever the
+ * context is suspended, and on iOS obeys the silent switch).
+ */
+const ENVELOPE_FRAME_S = 0.02;
+let envelope: Float32Array | null = null;
+
+async function computeEnvelope(blob: Blob, mine: number): Promise<void> {
+  const Offline = typeof window !== 'undefined' ? window.OfflineAudioContext : undefined;
+  if (!Offline) return;
+  try {
+    const decoded = await new Offline(1, 1, 24000).decodeAudioData(await blob.arrayBuffer());
+    if (mine !== token) return;
+    const data = decoded.getChannelData(0);
+    const frame = Math.max(1, Math.round(decoded.sampleRate * ENVELOPE_FRAME_S));
+    const out = new Float32Array(Math.ceil(data.length / frame));
+    for (let f = 0; f < out.length; f++) {
+      let sum = 0;
+      const end = Math.min(data.length, (f + 1) * frame);
+      for (let i = f * frame; i < end; i++) sum += data[i] * data[i];
+      out[f] = Math.sqrt(sum / Math.max(1, end - f * frame));
+    }
+    envelope = out;
+  } catch {
+    // No level for this utterance; voice mode falls back to a synthetic one.
+  }
+}
+
+/** Level of the utterance at its current playback position, or null if unknown. */
+export function getTtsLevel(): number | null {
+  if (!audio || !envelope) return null;
+  const frame = Math.floor(audio.currentTime / ENVELOPE_FRAME_S);
+  return frame < envelope.length ? envelope[frame] : 0;
 }
 
 /** Only a stream ending in the active conversation may trigger autoplay. */
@@ -61,15 +202,17 @@ export function shouldAutoplayFinishedReply(
 }
 
 function teardown(): void {
+  envelope = null;
   if (audio) {
     // Detach first: clearing src re-runs the media load algorithm, which fails
     // on an empty source and dispatches an `error` event. With the handler
     // still attached that surfaces as a bogus "Playback failed" after every
-    // successful utterance.
+    // successful utterance. The element itself is kept: it is the unlocked one.
     audio.onended = null;
     audio.onerror = null;
     audio.pause();
-    audio.src = '';
+    audio.removeAttribute('src');
+    audio.load();
     audio = null;
   }
   if (objectUrl) {
@@ -127,8 +270,10 @@ export const useTtsStore = create<TtsStore>((set, get) => ({
 
       const url = URL.createObjectURL(blob);
       objectUrl = url;
-      const el = new Audio(url);
+      const el = getPlayer();
       audio = el;
+      el.src = url;
+      void computeEnvelope(blob, mine);
 
       el.onended = () => {
         if (mine !== token) return;
@@ -175,6 +320,12 @@ export function __resetTtsForTests(): void {
   teardown();
   token = 0;
   healthProbe = null;
+  player = null;
+  unlocked = false;
+  audioContext = null;
+  silentUri = null;
+  removeUnlockListeners();
+  installUnlockListeners();
   useTtsStore.setState({
     state: 'idle',
     speakingId: null,
