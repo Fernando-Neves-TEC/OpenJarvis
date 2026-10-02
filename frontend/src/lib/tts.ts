@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { synthesizeSpeech, fetchTtsHealth } from './api';
+import { audioDiag, audioDiagError, audioDiagMediaError, audioDiagOk } from './audio-diag';
 
 export type TtsState = 'idle' | 'loading' | 'speaking';
 
@@ -122,6 +123,7 @@ export const useTtsStore = create<TtsStore>((set, get) => ({
     try {
       const blob = await synthesizeSpeech(trimmed, { signal: ac.signal });
       if (mine !== token) return;
+      audioDiag(`áudio recebido: ${blob.type || 'sem tipo'}, ${blob.size} bytes`);
 
       const url = URL.createObjectURL(blob);
       objectUrl = url;
@@ -135,11 +137,18 @@ export const useTtsStore = create<TtsStore>((set, get) => ({
       };
       el.onerror = () => {
         if (mine !== token) return;
+        audioDiagMediaError(el);
         teardown();
         set({ state: 'idle', speakingId: null, error: 'Playback failed', errorId: id });
       };
 
-      await el.play();
+      try {
+        await el.play();
+        audioDiagOk('audio.play()');
+      } catch (playErr) {
+        audioDiagError('audio.play()', playErr);
+        throw playErr;
+      }
       if (mine === token) set({ state: 'speaking', speakingId: id });
     } catch (err) {
       if (mine !== token) return;

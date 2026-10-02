@@ -7,6 +7,7 @@ import { useAppStore } from '../../lib/store';
 import { getTtsAudioElement, useTtsStore } from '../../lib/tts';
 import { toSpeakableText } from '../../lib/message-text';
 import { VoiceActivityDetector, isMeaningfulTranscript, rmsLevel } from '../../lib/vad';
+import { audioDiag, audioDiagError, audioDiagOk } from '../../lib/audio-diag';
 
 type Phase =
   | 'starting'
@@ -230,7 +231,11 @@ export default function VoiceMode({ onSend, onClose }: VoiceModeProps) {
 
       const ctx = new AudioContext();
       ctxRef.current = ctx;
-      await ctx.resume().catch(() => {});
+      await ctx.resume().then(
+        () => audioDiagOk(`AudioContext.resume() estado=${ctx.state}`),
+        (err) => audioDiagError('AudioContext.resume()', err),
+      );
+      ctx.onstatechange = () => audioDiag(`AudioContext estado=${ctx.state}`);
       const micAnalyser = ctx.createAnalyser();
       micAnalyser.fftSize = 1024;
       ctx.createMediaStreamSource(stream).connect(micAnalyser);
@@ -272,6 +277,7 @@ export default function VoiceMode({ onSend, onClose }: VoiceModeProps) {
           if (el && el !== tappedElementRef.current && ctx.state === 'running') {
             try {
               ctx.createMediaElementSource(el).connect(ttsAnalyser);
+              audioDiag('áudio da resposta roteado pelo AudioContext');
             } catch {
               // Already routed elsewhere; the synthetic envelope below covers it.
             }
