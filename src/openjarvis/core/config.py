@@ -1630,6 +1630,10 @@ class SpeechConfig:
     # STT word-bias hint (e.g. the assistant's wake word). Forwarded to
     # faster-whisper's `hotwords` param; empty = no bias.
     hotwords: str = ""
+    # Seconds of silence before the terminal `jarvis chat --voice` mic
+    # recording auto-stops. Matches speech/voice_io.py's own default (1.5s)
+    # when unset; lower it for snappier turn-taking.
+    silence_seconds: float = 1.5
     # Word -> replacement spelling applied to text before TTS synthesis,
     # case-insensitive whole-word match (e.g. mapping "Jarvis" to a spelling
     # with an accent mark to fix a pt-BR mispronunciation). Empty by default

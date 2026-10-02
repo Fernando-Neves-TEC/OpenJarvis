@@ -69,6 +69,16 @@ class VoiceSession:
         speech_config = getattr(self._config, "speech", None)
         return dict(getattr(speech_config, "pronunciations", None) or {})
 
+    def get_silence_seconds(self) -> Optional[float]:
+        """Return the configured ``speech.silence_seconds``, or ``None`` to
+        let ``record_until_silence()`` use its own built-in default."""
+        if self._config is None:
+            from openjarvis.core.config import load_config
+
+            self._config = load_config()
+        speech_config = getattr(self._config, "speech", None)
+        return getattr(speech_config, "silence_seconds", None)
+
     def get_tts_backend(self) -> Any:
         """Return a cached healthy TTS backend, falling through once per key."""
         if self._tts_backend is not None:
@@ -149,8 +159,10 @@ def record_voice(
         return VOICE_EXIT
 
     console.print("[dim cyan]Listening… (speak now, stops on silence)[/dim cyan]")
+    silence_seconds = active_session.get_silence_seconds()
+    record_kwargs = {"silence_seconds": silence_seconds} if silence_seconds else {}
     try:
-        audio_bytes = record_until_silence()
+        audio_bytes = record_until_silence(**record_kwargs)
     except KeyboardInterrupt:
         return VOICE_EXIT
     except Exception as exc:
