@@ -63,6 +63,10 @@ def _make_engine(key: str, config: JarvisConfig) -> InferenceEngine:
             sampling=cfg.sampling,
         )
 
+    if key == "ollama":
+        cfg = config.engine.ollama
+        return cls(host=cfg.host or None, think_with_tools=cfg.think_with_tools)
+
     host_attr = _HOST_MAP.get(key)
     if host_attr is not None:
         host = getattr(config.engine, host_attr, None)
