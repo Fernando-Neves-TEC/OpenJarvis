@@ -2,60 +2,11 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any, Optional
 
 from rich.markup import escape
 
 VOICE_EXIT = object()
-
-# Matches most emoji / pictographic ranges. Not exhaustive, but covers what
-# chat models actually emit.
-_EMOJI_RE = re.compile(
-    "["
-    "\U0001F300-\U0001FAFF"
-    "\U00002600-\U000027BF"
-    "\U0001F1E6-\U0001F1FF"
-    "\U00002190-\U000021FF"
-    "\U00002B00-\U00002BFF"
-    "\U0000FE0F"
-    "]+",
-    flags=re.UNICODE,
-)
-
-# Kokoro's pt-BR voices stress "Jarvis" on the wrong syllable ("Jarvís").
-# Swap in the accented spelling so the G2P stresses the first syllable
-# instead: "Járvis".
-_JARVIS_RE = re.compile(r"\bjarvis\b", re.IGNORECASE)
-
-
-def _strip_markdown_for_speech(text: str) -> str:
-    """Drop markdown/emoji so TTS doesn't read out literal symbols.
-
-    Only the copy handed to the TTS backend is cleaned -- the on-screen
-    ``console.print(Markdown(content))`` text is untouched. Mirrors the
-    regex cleanup already used for the morning-digest voice briefing
-    (see ``agents/morning_digest.py``), extended to cover links, code
-    fences/backticks, and emoji too. Also fixes known TTS mispronunciations
-    (see ``_JARVIS_RE``).
-    """
-    cleaned = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)  # [text](url) -> text
-    cleaned = re.sub(r"```.*?```", "", cleaned, flags=re.DOTALL)  # fenced code
-    cleaned = re.sub(r"^#{1,6}\s+", "", cleaned, flags=re.MULTILINE)  # headings
-    cleaned = re.sub(
-        r"^\s*(?:[-*+•]|\d+[.)])\s+", "", cleaned, flags=re.MULTILINE
-    )  # list markers
-    cleaned = re.sub(r"\*{1,3}([^*]+)\*{1,3}", r"\1", cleaned)  # **bold**/*italic*
-    cleaned = re.sub(r"_{2,3}([^_]+)_{2,3}", r"\1", cleaned)  # __bold__
-    # Only strip stray * # ` -- a lone "_" is almost always a literal
-    # character (snake_case, file names), not markdown emphasis.
-    cleaned = re.sub(r"[*#`]", "", cleaned)
-    cleaned = _EMOJI_RE.sub("", cleaned)
-    cleaned = re.sub(r"[ \t]+", " ", cleaned)
-    cleaned = re.sub(r"\n{2,}", ". ", cleaned)
-    cleaned = _JARVIS_RE.sub("Járvis", cleaned)
-    return cleaned.replace("\n", " ").strip()
-
 
 # Backend selection is shared with the API server and lives in
 # openjarvis.speech._tts_discovery. Importing that at module level would pull
@@ -103,17 +54,20 @@ class VoiceSession:
             from openjarvis.speech._discovery import get_speech_backend
 
             config = self._config if self._config is not None else load_config()
-            self._config = config  # cache so get_stt_language() can reuse it
+            self._config = config  # cache so get_pronunciations() can reuse it
             self._stt_backend = get_speech_backend(config)
             self._stt_resolved = True
         return self._stt_backend
 
-    def get_stt_language(self) -> Optional[str]:
-        """Return the configured ``speech.language`` (e.g. ``"pt"``), or
-        ``None`` for Whisper auto-detect. Call after ``get_stt_backend()``
-        so ``self._config`` is populated."""
+    def get_pronunciations(self) -> dict[str, str]:
+        """Return the configured ``speech.pronunciations`` map for TTS text
+        cleanup (see ``openjarvis.speech.tts.clean_text_for_speech``)."""
+        if self._config is None:
+            from openjarvis.core.config import load_config
+
+            self._config = load_config()
         speech_config = getattr(self._config, "speech", None)
-        return getattr(speech_config, "language", "") or None
+        return dict(getattr(speech_config, "pronunciations", None) or {})
 
     def get_tts_backend(self) -> Any:
         """Return a cached healthy TTS backend, falling through once per key."""
@@ -209,12 +163,10 @@ def record_voice(
 
     console.print("[dim]Transcribing…[/dim]")
     try:
-        result = backend.transcribe(
-            audio_bytes,
-            format="wav",
-            language=active_session.get_stt_language(),
-            hotwords="Jarvis",
-        )
+        # language/hotwords come from config.speech inside the backend
+        # itself (see FasterWhisperBackend) -- same source the HTTP
+        # /v1/speech/transcribe route uses, so both paths stay in sync.
+        result = backend.transcribe(audio_bytes, format="wav")
         text = result.text.strip()
         if text:
             console.print(f"[bold]You (voice):[/bold] {_terminal_safe_text(text)}")
@@ -228,10 +180,11 @@ def record_voice(
 
 def speak(text: str, console: Any, session: VoiceSession | None = None) -> None:
     """Synthesize and play text, reusing a healthy backend for the session."""
+    from openjarvis.speech.tts import clean_text_for_speech
     from openjarvis.speech.voice_io import play_wav
 
-    text = _strip_markdown_for_speech(text)
     active_session = session or VoiceSession()
+    text = clean_text_for_speech(text, active_session.get_pronunciations())
 
     # Resolved before the loop: a bad config value must surface as a config
     # error, not be swallowed by the per-backend fallback handler below.

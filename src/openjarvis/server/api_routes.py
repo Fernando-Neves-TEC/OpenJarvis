@@ -1152,6 +1152,16 @@ async def synthesize_speech(request: Request, body: SpeechSynthesizeRequest):
     if body.speed is not None:
         speed = body.speed
 
+    # Same cleanup the terminal `jarvis chat --voice` path applies before
+    # synthesis (see cli/_voice_chat.py:speak) -- strips markdown/emoji and
+    # fixes configured mispronunciations, so GUI/desktop voice output
+    # doesn't read out literal "**", "#", etc.
+    from openjarvis.speech.tts import clean_text_for_speech
+
+    config = getattr(request.app.state, "config", None)
+    pronunciations = getattr(getattr(config, "speech", None), "pronunciations", None)
+    text = clean_text_for_speech(text, pronunciations)
+
     try:
         result = await asyncio.to_thread(
             backend.synthesize,

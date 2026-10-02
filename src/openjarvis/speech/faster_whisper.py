@@ -34,10 +34,18 @@ class FasterWhisperBackend(SpeechBackend):
         model_size: str = "base",
         device: str = "auto",
         compute_type: str = "float16",
+        language: str = "",
+        hotwords: str = "",
     ) -> None:
         self._model_size = model_size
         self._device = device
         self._compute_type = compute_type
+        # Configured defaults (from config.speech), used when a call doesn't
+        # override them -- this is the single place both the CLI and the
+        # HTTP server's /v1/speech/transcribe route get pt-BR language/hotword
+        # bias from, since both construct this backend via _discovery.py.
+        self._default_language = language or None
+        self._default_hotwords = hotwords or None
         self._model: Optional[WhisperModel] = None
         self._last_error: Optional[str] = None
 
@@ -103,7 +111,17 @@ class FasterWhisperBackend(SpeechBackend):
         language: Optional[str] = None,
         hotwords: Optional[str] = None,
     ) -> TranscriptionResult:
-        """Transcribe audio bytes using Faster-Whisper."""
+        """Transcribe audio bytes using Faster-Whisper.
+
+        ``language``/``hotwords`` passed here override the configured
+        defaults for this one call; omit them (``None``) to use whatever
+        was configured at construction time (``config.speech.language`` /
+        ``config.speech.hotwords``).
+        """
+        if language is None:
+            language = self._default_language
+        if hotwords is None:
+            hotwords = self._default_hotwords
         try:
             model = self._ensure_model()
 

@@ -1627,6 +1627,14 @@ class SpeechConfig:
     tts_backend: str = "kokoro"  # "kokoro", "openai_tts", "cartesia"
     voice_id: str = "bm_george"
     voice_speed: float = 1.0
+    # STT word-bias hint (e.g. the assistant's wake word). Forwarded to
+    # faster-whisper's `hotwords` param; empty = no bias.
+    hotwords: str = ""
+    # Word -> replacement spelling applied to text before TTS synthesis,
+    # case-insensitive whole-word match (e.g. mapping "Jarvis" to a spelling
+    # with an accent mark to fix a pt-BR mispronunciation). Empty by default
+    # -- no assumptions about the assistant's name baked into the code.
+    pronunciations: Dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
