@@ -128,14 +128,17 @@ export default function VoiceMode({ onSend, onClose }: VoiceModeProps) {
     await tts.ensureHealth();
     if (closedRef.current) return;
     if (useTtsStore.getState().available !== true) {
+      audioDiag('modo de voz: TTS indisponível, resposta não será falada');
       setNotice('Voice output is unavailable, so replies are shown but not spoken.');
       startListening();
       return;
     }
+    audioDiag('modo de voz: chamando speak()');
     await useTtsStore.getState().speak(id, text);
     if (closedRef.current) return;
     if (useTtsStore.getState().speakingId !== id) {
       // speak() gave up (synthesis failed or was interrupted) without playing.
+      audioDiag(`modo de voz: speak() terminou sem tocar (${useTtsStore.getState().error ?? 'sem erro'})`);
       if (phaseRef.current === 'speaking') startListening();
       return;
     }

@@ -2,18 +2,12 @@
  * TEMPORARY on-screen audio diagnostics (iOS Safari has no hover tooltips and
  * no easy console). Remove together with lib/audio-diag.ts once resolved.
  */
-import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { audioDiag, useAudioDiag } from '../lib/audio-diag';
+import { useAudioDiag } from '../lib/audio-diag';
 
 export function AudioDiagBanner() {
   const lines = useAudioDiag((s) => s.lines);
   const clear = useAudioDiag((s) => s.clear);
-
-  useEffect(() => {
-    const probe = document.createElement('audio');
-    audioDiag(`canPlayType("audio/wav") = "${probe.canPlayType('audio/wav') || 'vazio'}"`);
-  }, []);
 
   if (lines.length === 0) return null;
   return createPortal(

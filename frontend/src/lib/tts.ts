@@ -110,6 +110,7 @@ export function unlockAudio(): void {
   }
   // Never interrupt a real utterance to play the silent primer.
   if (unlocked || audio) return;
+  audioDiag('toque detectado: tocando silêncio para desbloquear');
   const el = getPlayer();
   silentUri ??= silentWavUri();
   el.src = silentUri;
@@ -251,7 +252,10 @@ export const useTtsStore = create<TtsStore>((set, get) => ({
 
   speak: async (id: string, text: string) => {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed) {
+      audioDiag('speak() ignorado: texto vazio');
+      return;
+    }
 
     // Bump before teardown so a synthesis still in flight is both aborted and
     // fenced off by the token, even if the abort loses the race.
@@ -264,8 +268,12 @@ export const useTtsStore = create<TtsStore>((set, get) => ({
     controller = ac;
 
     try {
+      audioDiag(`speak() chamado: pedindo síntese (${trimmed.length} caracteres)`);
       const blob = await synthesizeSpeech(trimmed, { signal: ac.signal });
-      if (mine !== token) return;
+      if (mine !== token) {
+        audioDiag('áudio recebido, mas descartado: outra fala começou');
+        return;
+      }
       audioDiag(`áudio recebido: ${blob.type || 'sem tipo'}, ${blob.size} bytes`);
 
       const url = URL.createObjectURL(blob);
@@ -273,10 +281,12 @@ export const useTtsStore = create<TtsStore>((set, get) => ({
       const el = getPlayer();
       audio = el;
       el.src = url;
+      audioDiag(`src definido (elemento desbloqueado: ${unlocked ? 'sim' : 'não'})`);
       void computeEnvelope(blob, mine);
 
       el.onended = () => {
         if (mine !== token) return;
+        audioDiag('evento ended: fala terminou');
         teardown();
         set({ state: 'idle', speakingId: null });
       };
@@ -288,6 +298,7 @@ export const useTtsStore = create<TtsStore>((set, get) => ({
       };
 
       try {
+        audioDiag(`play() chamado (AudioContext: ${audioContext?.state ?? 'nenhum'})`);
         await el.play();
         audioDiagOk('audio.play()');
       } catch (playErr) {
@@ -297,7 +308,7 @@ export const useTtsStore = create<TtsStore>((set, get) => ({
       if (mine === token) set({ state: 'speaking', speakingId: id });
     } catch (err) {
       if (mine !== token) return;
-      if (err instanceof DOMException && err.name === 'AbortError') return;
+      if (err instanceof DOMException && err.name === 'AbortError' && ac.signal.aborted) return;
       teardown();
       set({
         state: 'idle',

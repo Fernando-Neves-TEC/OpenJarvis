@@ -6,6 +6,7 @@ import { StreamingDots } from './StreamingDots';
 import { useAppStore } from '../../lib/store';
 import { shouldAutoplayFinishedReply, useTtsStore } from '../../lib/tts';
 import { stripThinkTags } from '../../lib/message-text';
+import { audioDiag } from '../../lib/audio-diag';
 import { Sparkles, PanelRightOpen, PanelRightClose, Database, MessageSquare, X } from 'lucide-react';
 import { listConnectors } from '../../lib/connectors-api';
 
@@ -62,7 +63,13 @@ export function ChatArea() {
     streamingConversationRef.current = isCurrentChatStreaming ? activeId : null;
 
     if (!justFinished) return;
-    if (!voiceOutputEnabled || !voiceAutoplay) return;
+    if (!voiceOutputEnabled || !voiceAutoplay) {
+      audioDiag(
+        `autoplay pulado: saída de voz ${voiceOutputEnabled ? 'ligada' : 'DESLIGADA'}, `
+        + `leitura automática ${voiceAutoplay ? 'ligada' : 'DESLIGADA'}`,
+      );
+      return;
+    }
 
     if (!last || last.role !== 'assistant' || activeId === null) return;
 
@@ -76,11 +83,15 @@ export function ChatArea() {
       const currentLast = app.messages[app.messages.length - 1];
       if (app.activeId !== completedConversationId || app.streamState.isStreaming) return;
       if (!app.settings.voiceOutputEnabled || !app.settings.voiceAutoplay) return;
-      if (currentLast?.id !== completedMessageId || currentTts.available !== true) return;
+      if (currentLast?.id !== completedMessageId || currentTts.available !== true) {
+        audioDiag(`autoplay pulado: TTS disponível=${String(currentTts.available)}`);
+        return;
+      }
       if (currentTts.autoSpokenId === completedMessageId) return;
 
       const text = stripThinkTags(currentLast.content);
       if (!text) return;
+      audioDiag('autoplay: resposta terminou, chamando speak()');
       currentTts.markAutoSpoken(completedMessageId);
       void currentTts.speak(completedMessageId, text);
     });

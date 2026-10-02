@@ -12,7 +12,7 @@ interface AudioDiagStore {
 
 export const useAudioDiag = create<AudioDiagStore>((set) => ({
   lines: [],
-  push: (line) => set((s) => ({ lines: [...s.lines.slice(-5), line] })),
+  push: (line) => set((s) => ({ lines: [...s.lines.slice(-11), line] })),
   clear: () => set({ lines: [] }),
 }));
 
@@ -36,6 +36,19 @@ function stamp(): string {
 
 export function audioDiag(line: string): void {
   useAudioDiag.getState().push(`${stamp()} ${line}`);
+}
+
+// Once per page load (not per banner mount): which build is running and
+// whether a service worker controls the page, so a stale cached copy shows.
+if (typeof document !== 'undefined') {
+  const chunk = new URL(import.meta.url).pathname.split('/').pop() ?? '?';
+  const sw = typeof navigator !== 'undefined' && navigator.serviceWorker?.controller
+    ? 'service worker ativo'
+    : 'sem service worker';
+  const probe = document.createElement('audio');
+  audioDiag(
+    `versão ${chunk} | ${sw} | canPlayType("audio/wav")="${probe.canPlayType('audio/wav') || 'vazio'}"`,
+  );
 }
 
 /** Describe a play()/resume() rejection, including how long since the last tap. */
