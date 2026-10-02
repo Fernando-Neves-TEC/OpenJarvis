@@ -1,5 +1,5 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
-import { Send, Square, Paperclip, Search } from 'lucide-react';
+import { useState, useRef, useCallback, useEffect, lazy, Suspense } from 'react';
+import { Send, Square, Paperclip, Search, AudioLines } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAppStore, generateId } from '../../lib/store';
 import { streamChat, streamResearch } from '../../lib/sse';
@@ -11,6 +11,9 @@ import {
   resolveChatEngine,
 } from '../../lib/chat-telemetry';
 import { MicButton } from './MicButton';
+
+// Three.js only loads when voice mode is first opened.
+const VoiceMode = lazy(() => import('../Voice/VoiceMode'));
 import { useSpeech } from '../../hooks/useSpeech';
 import type {
   ChatMessage,
@@ -171,15 +174,16 @@ export function InputArea() {
     resetStream();
   }, [resetStream]);
 
-  const sendMessage = useCallback(async () => {
-    const content = input.trim();
+  // `spoken` comes from voice mode; it bypasses (and leaves alone) the textarea.
+  const sendMessage = useCallback(async (spoken?: string) => {
+    const content = (spoken ?? input).trim();
     if (!content || streamState.isStreaming) return;
     if (!selectedModel) {
       toast.error('Pick a model first (⌘K)');
       return;
     }
 
-    setInput('');
+    if (spoken === undefined) setInput('');
 
     let convId = activeId;
     if (!convId) {
@@ -554,6 +558,15 @@ export function InputArea() {
     maxTokens,
   ]);
 
+  // Voice mode outlives many renders; route it through a ref so each turn uses
+  // the current sendMessage (and so the conversation the first turn created).
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  const sendMessageRef = useRef(sendMessage);
+  sendMessageRef.current = sendMessage;
+  const sendSpoken = useCallback((text: string) => sendMessageRef.current(text), []);
+  const closeVoice = useCallback(() => setVoiceOpen(false), []);
+  const voiceDisabled = !speechAvailable || streamState.isStreaming;
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -632,7 +645,18 @@ export function InputArea() {
               reason={micReason}
             />
             <button
-              onClick={sendMessage}
+              type="button"
+              onClick={() => setVoiceOpen(true)}
+              disabled={voiceDisabled}
+              title={speechAvailable ? 'Voice mode (hands-free conversation)' : 'Voice mode needs a speech-to-text backend'}
+              aria-label="Open voice mode"
+              className="p-2 rounded-xl transition-colors shrink-0 cursor-pointer disabled:opacity-30 disabled:cursor-default"
+              style={{ color: 'var(--color-text-secondary)' }}
+            >
+              <AudioLines size={16} />
+            </button>
+            <button
+              onClick={() => sendMessage()}
               disabled={streamState.isStreaming || !input.trim() || modelLoading || !selectedModel}
               title={selectedModel ? 'Send message' : 'Pick a model first (⌘K)'}
               className="p-2 rounded-xl transition-colors shrink-0 cursor-pointer disabled:opacity-30 disabled:cursor-default"
@@ -652,6 +676,12 @@ export function InputArea() {
           <kbd className="font-mono">Shift+Enter</kbd> for new line
         </span>
       </div>
+      {/* Mounted outside the streaming/idle toggle so a reply never unmounts it. */}
+      {voiceOpen && (
+        <Suspense fallback={null}>
+          <VoiceMode onSend={sendSpoken} onClose={closeVoice} />
+        </Suspense>
+      )}
     </div>
   );
 }
