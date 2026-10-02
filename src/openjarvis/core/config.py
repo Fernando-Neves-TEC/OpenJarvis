@@ -369,6 +369,10 @@ class OllamaEngineConfig:
     """Per-engine config for Ollama."""
 
     host: str = ""
+    # Enable Ollama's ``think`` on requests that carry tools. Some models
+    # (e.g. gemma4:e4b) never emit tool calls with thinking off, which is the
+    # adapter's default. Requests without tools are unaffected.
+    think_with_tools: bool = False
 
 
 @dataclass(slots=True)

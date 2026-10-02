@@ -120,12 +120,14 @@ class OllamaEngine(AsyncHTTPEngineMixin, InferenceEngine):
         host: str | None = None,
         *,
         timeout: float = 1800.0,
+        think_with_tools: bool = False,
     ) -> None:
         # Priority: explicit host (from config.toml) > OLLAMA_HOST env var > default
         if host is None:
             env_host = os.environ.get("OLLAMA_HOST")
             host = env_host or self._DEFAULT_HOST
         self._host = host.rstrip("/")
+        self._think_with_tools = think_with_tools
         # Used by the shared async streaming plumbing (AsyncHTTPEngineMixin) so a
         # wedged token read is bounded by ``timeout`` instead of hanging the
         # single event loop for the httpx default.
@@ -137,6 +139,24 @@ class OllamaEngine(AsyncHTTPEngineMixin, InferenceEngine):
         self._client = httpx.Client(base_url=self._host, timeout=timeout)
         # Last stream usage — captured from Ollama's final chunk
         self._last_stream_usage: Dict[str, int] = {}
+
+    def _apply_think(self, payload: Dict[str, Any], kwargs: Dict[str, Any]) -> bool:
+        """Set ``payload["think"]``; return True when enabled only for tools.
+
+        Extended thinking is disabled by default (Qwen3.5 etc.): when enabled,
+        thinking tokens can consume the entire budget and the visible content
+        comes back empty. ``think_with_tools`` opts tool-bearing requests in,
+        because some models (gemma4:e4b) never call tools without thinking.
+        Ollama returns the reasoning in ``message.thinking``, which this
+        adapter never reads, so it cannot reach content, history or TTS.
+        """
+        if "think" in kwargs:
+            if kwargs["think"] is not None:
+                payload["think"] = kwargs["think"]
+            return False
+        auto = self._think_with_tools and bool(kwargs.get("tools"))
+        payload["think"] = auto
+        return auto
 
     def generate(
         self,
@@ -168,13 +188,7 @@ class OllamaEngine(AsyncHTTPEngineMixin, InferenceEngine):
                 kwargs=kwargs,
             ),
         }
-        # Disable extended thinking by default (Qwen3.5 etc.).
-        # When enabled, thinking tokens consume the entire budget and
-        # the visible content comes back empty.
-        if "think" not in kwargs:
-            payload["think"] = False
-        elif kwargs["think"] is not None:
-            payload["think"] = kwargs["think"]
+        auto_think = self._apply_think(payload, kwargs)
         # Pass tools if provided
         tools = kwargs.get("tools")
         if tools:
@@ -191,6 +205,10 @@ class OllamaEngine(AsyncHTTPEngineMixin, InferenceEngine):
                 payload["format"] = "json"
         try:
             resp = self._client.post("/api/chat", json=payload)
+            if resp.status_code == 400 and auto_think:
+                # Model may not support thinking -- keep tools, drop think
+                payload["think"] = False
+                resp = self._client.post("/api/chat", json=payload)
             if resp.status_code == 400 and tools:
                 # Model may not support function calling -- retry without tools
                 payload.pop("tools", None)
@@ -389,17 +407,17 @@ class OllamaEngine(AsyncHTTPEngineMixin, InferenceEngine):
                 kwargs=kwargs,
             ),
         }
-        if "think" not in kwargs:
-            payload["think"] = False
-        elif kwargs["think"] is not None:
-            payload["think"] = kwargs["think"]
+        auto_think = self._apply_think(payload, kwargs)
 
         tools = kwargs.get("tools")
         if tools:
             payload["tools"] = tools
 
         async for chunk in self._run_stream(
-            payload, messages, retry_without_tools=bool(tools)
+            payload,
+            messages,
+            retry_without_tools=bool(tools),
+            retry_without_think=auto_think,
         ):
             yield chunk
 
@@ -409,6 +427,7 @@ class OllamaEngine(AsyncHTTPEngineMixin, InferenceEngine):
         messages: Sequence[Message],
         *,
         retry_without_tools: bool,
+        retry_without_think: bool = False,
     ) -> AsyncIterator[StreamChunk]:
         """Execute the streaming request and yield parsed StreamChunks."""
         try:
@@ -417,6 +436,16 @@ class OllamaEngine(AsyncHTTPEngineMixin, InferenceEngine):
             # honours ``timeout``.
             client = self._get_async_client()
             async with client.stream("POST", "/api/chat", json=payload) as resp:
+                if resp.status_code == 400 and retry_without_think:
+                    # Model may not support thinking -- keep tools, drop think.
+                    payload["think"] = False
+                    async for c in self._run_stream(
+                        payload,
+                        messages,
+                        retry_without_tools=retry_without_tools,
+                    ):
+                        yield c
+                    return
                 if resp.status_code == 400 and retry_without_tools:
                     # Model doesn't support tools — retry without them.
                     # PRESERVED: this specific 400 path must still trigger the
