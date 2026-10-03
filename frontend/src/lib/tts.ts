@@ -53,8 +53,8 @@ function getPlayer(): HTMLAudioElement {
   return player;
 }
 
-/** 50 ms of 16-bit mono silence, built synchronously so it fits in a tap. */
-function silentWavUri(): string {
+/** 50 ms of 16-bit mono PCM silence as a complete WAV file. */
+export function buildSilentWav(): Uint8Array<ArrayBuffer> {
   const samples = 400;
   const bytes = new Uint8Array(44 + samples * 2);
   const view = new DataView(bytes.buffer);
@@ -74,12 +74,20 @@ function silentWavUri(): string {
   view.setUint16(34, 16, true);
   ascii(36, 'data');
   view.setUint32(40, samples * 2, true);
-  let binary = '';
-  for (const b of bytes) binary += String.fromCharCode(b);
-  return `data:audio/wav;base64,${btoa(binary)}`;
+  return bytes;
 }
 
+/**
+ * The primer as a blob: URL, created synchronously so it fits in a tap. Not a
+ * data: URI: the server's CSP (`media-src 'self' blob:`) blocks those, which
+ * browsers report as NotSupportedError ("no supported source").
+ */
 let silentUri: string | null = null;
+
+function silentClipUrl(): string {
+  silentUri ??= URL.createObjectURL(new Blob([buildSilentWav()], { type: 'audio/wav' }));
+  return silentUri;
+}
 
 /**
  * The app-wide AudioContext, created and resumed inside a tap so iOS starts it
@@ -107,15 +115,15 @@ export function unlockAudio(): void {
   // Never interrupt a real utterance to play the silent primer.
   if (unlocked || audio) return;
   const el = getPlayer();
-  silentUri ??= silentWavUri();
-  el.src = silentUri;
+  const clip = silentClipUrl();
+  el.src = clip;
   const started = el.play();
   Promise.resolve(started).then(
     () => {
       unlocked = true;
       removeUnlockListeners();
       // speak() may have taken the element over while the primer started.
-      if (!audio && el.src === silentUri) el.pause();
+      if (!audio && el.src === clip) el.pause();
     },
     () => {
       // Still locked; the listeners stay installed for the next gesture.
@@ -286,7 +294,9 @@ export const useTtsStore = create<TtsStore>((set, get) => ({
       if (mine === token) set({ state: 'speaking', speakingId: id });
     } catch (err) {
       if (mine !== token) return;
-      if (err instanceof DOMException && err.name === 'AbortError') return;
+      // Only our own abort is a silent cancel. iOS can reject play() with an
+      // AbortError too; swallowing that left the state stuck in 'loading'.
+      if (err instanceof DOMException && err.name === 'AbortError' && ac.signal.aborted) return;
       teardown();
       set({
         state: 'idle',

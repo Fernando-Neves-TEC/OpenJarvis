@@ -9,6 +9,7 @@ import { synthesizeSpeech, fetchTtsHealth } from './api';
 import {
   useTtsStore,
   __resetTtsForTests,
+  buildSilentWav,
   getAudioContext,
   shouldAutoplayFinishedReply,
   unlockAudio,
@@ -296,8 +297,41 @@ describe('iOS audio unlock', () => {
 
     expect(FakeAudio.instances).toHaveLength(1);
     const [primer, reply] = FakeAudio.instances[0].playedSrcs;
-    expect(primer.startsWith('data:audio/wav;base64,')).toBe(true);
-    expect(reply).toBe(created[0]);
+    // blob:, not data: -- the server CSP only allows `media-src 'self' blob:`.
+    expect(primer).toBe(created[0]);
+    expect(primer.startsWith('blob:')).toBe(true);
+    expect(reply).toBe(created[1]);
+  });
+
+  it('builds a well-formed 16-bit mono PCM WAV for the primer', () => {
+    const bytes = buildSilentWav();
+    const view = new DataView(bytes.buffer);
+    const ascii = (at: number) => String.fromCharCode(...bytes.slice(at, at + 4));
+
+    expect(ascii(0)).toBe('RIFF');
+    expect(view.getUint32(4, true)).toBe(bytes.length - 8);
+    expect(ascii(8)).toBe('WAVE');
+    expect(ascii(12)).toBe('fmt ');
+    expect(view.getUint16(20, true)).toBe(1); // PCM
+    expect(view.getUint16(22, true)).toBe(1); // mono
+    const rate = view.getUint32(24, true);
+    expect(view.getUint32(28, true)).toBe(rate * 2); // byte rate
+    expect(view.getUint16(32, true)).toBe(2); // block align
+    expect(view.getUint16(34, true)).toBe(16);
+    expect(ascii(36)).toBe('data');
+    expect(view.getUint32(40, true)).toBe(bytes.length - 44);
+  });
+
+  it('reports a play() AbortError it did not cause instead of hanging', async () => {
+    synth.mockResolvedValue(new Blob(['wav']));
+    FakeAudio.playResults = [
+      () => Promise.reject(new DOMException('interrupted', 'AbortError')),
+    ];
+
+    await useTtsStore.getState().speak('m1', 'Olá');
+
+    expect(useTtsStore.getState().state).toBe('idle');
+    expect(useTtsStore.getState().errorId).toBe('m1');
   });
 
   it('stops listening for taps once unlocked', async () => {
