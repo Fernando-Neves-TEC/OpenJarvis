@@ -31,6 +31,11 @@ export default defineConfig({
         theme_color: '#161618',
         background_color: '#161618',
         display: 'standalone',
+        // Stable identity even though the shortcut opens straight into voice
+        // mode; `/?voice=1` shows the tap-to-talk gate iOS needs.
+        id: '/',
+        start_url: '/?voice=1',
+        scope: '/',
         icons: [
           { src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png' },
           { src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png' },

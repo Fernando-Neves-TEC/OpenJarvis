@@ -16,6 +16,8 @@ import { MicButton } from './MicButton';
 const VoiceMode = lazy(() => import('../Voice/VoiceMode'));
 import { useSpeech } from '../../hooks/useSpeech';
 import { unlockAudio } from '../../lib/tts';
+import { useSearchParams } from 'react-router';
+import { VoiceStartGate } from '../Voice/VoiceStartGate';
 import type {
   ChatMessage,
   MessageTelemetry,
@@ -568,6 +570,24 @@ export function InputArea() {
   const closeVoice = useCallback(() => setVoiceOpen(false), []);
   const voiceDisabled = !speechAvailable || streamState.isStreaming;
 
+  // `/?voice=1` (the home-screen shortcut) lands on a "tap to talk" gate: iOS
+  // needs a tap before it allows the mic and audio playback.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [voiceGate, setVoiceGate] = useState(() => searchParams.get('voice') === '1');
+  const leaveVoiceGate = useCallback(() => {
+    setVoiceGate(false);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('voice');
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+  const startVoiceFromGate = useCallback(() => {
+    unlockAudio();
+    leaveVoiceGate();
+    setVoiceOpen(true);
+  }, [leaveVoiceGate]);
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -681,6 +701,13 @@ export function InputArea() {
           <kbd className="font-mono">Shift+Enter</kbd> for new line
         </span>
       </div>
+      {voiceGate && !voiceOpen && (
+        <VoiceStartGate
+          ready={speechAvailable}
+          onStart={startVoiceFromGate}
+          onDismiss={leaveVoiceGate}
+        />
+      )}
       {/* Mounted outside the streaming/idle toggle so a reply never unmounts it. */}
       {voiceOpen && (
         <Suspense fallback={null}>

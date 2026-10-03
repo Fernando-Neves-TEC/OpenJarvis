@@ -110,6 +110,12 @@ interface Settings {
   voiceAutoplay: boolean;
 }
 
+function isNarrowViewport(): boolean {
+  return typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(max-width: 767px)').matches;
+}
+
 function loadSettings(): Settings {
   const defaults: Settings = {
     theme: 'system',
@@ -289,8 +295,10 @@ export const useAppStore = create<AppState>((set, get) => {
     settings: loadSettings(),
 
     commandPaletteOpen: false,
-    sidebarOpen: true,
-    systemPanelOpen: true,
+    // On phone-width screens both panels would cover the chat, so they start
+    // closed there (same 768px breakpoint as the md: overlay in Layout).
+    sidebarOpen: !isNarrowViewport(),
+    systemPanelOpen: !isNarrowViewport(),
 
     optInEnabled: localStorage.getItem(OPTIN_KEY) === 'true',
     optInDisplayName: localStorage.getItem(OPTIN_NAME_KEY) || '',
