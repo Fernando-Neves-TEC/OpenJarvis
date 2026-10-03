@@ -15,7 +15,6 @@ import { useAppStore } from './lib/store';
 import { fetchModels, fetchServerInfo, fetchSavings, submitSavings, isTauri } from './lib/api';
 import { OptInModal } from './components/OptInModal';
 import { UpdateChecker } from './components/Desktop/UpdateChecker';
-import { AudioDiagBanner } from './components/AudioDiagBanner';
 import { track, hashId } from './lib/analytics';
 
 export default function App() {
@@ -194,7 +193,6 @@ export default function App() {
         </Route>
       </Routes>
       <Toaster position="bottom-right" />
-      <AudioDiagBanner />
       {commandPaletteOpen && <CommandPalette />}
       {optInModalOpen && (
         <OptInModal onClose={() => setOptInModalOpen(false)} />

@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import { synthesizeSpeech, fetchTtsHealth } from './api';
-import { audioDiag, audioDiagError, audioDiagMediaError, audioDiagOk } from './audio-diag';
 
 export type TtsState = 'idle' | 'loading' | 'speaking';
 
@@ -103,14 +102,10 @@ export function getAudioContext(): AudioContext | null {
 export function unlockAudio(): void {
   const ctx = getAudioContext();
   if (ctx && ctx.state !== 'running') {
-    ctx.resume().then(
-      () => audioDiagOk(`AudioContext.resume() no toque, estado=${ctx.state}`),
-      (err) => audioDiagError('AudioContext.resume() no toque', err),
-    );
+    ctx.resume().catch(() => {});
   }
   // Never interrupt a real utterance to play the silent primer.
   if (unlocked || audio) return;
-  audioDiag('toque detectado: tocando silêncio para desbloquear');
   const el = getPlayer();
   silentUri ??= silentWavUri();
   el.src = silentUri;
@@ -119,11 +114,12 @@ export function unlockAudio(): void {
     () => {
       unlocked = true;
       removeUnlockListeners();
-      audioDiagOk('desbloqueio do áudio');
       // speak() may have taken the element over while the primer started.
       if (!audio && el.src === silentUri) el.pause();
     },
-    (err) => audioDiagError('desbloqueio do áudio', err),
+    () => {
+      // Still locked; the listeners stay installed for the next gesture.
+    },
   );
 }
 
@@ -252,10 +248,7 @@ export const useTtsStore = create<TtsStore>((set, get) => ({
 
   speak: async (id: string, text: string) => {
     const trimmed = text.trim();
-    if (!trimmed) {
-      audioDiag('speak() ignorado: texto vazio');
-      return;
-    }
+    if (!trimmed) return;
 
     // Bump before teardown so a synthesis still in flight is both aborted and
     // fenced off by the token, even if the abort loses the race.
@@ -268,47 +261,32 @@ export const useTtsStore = create<TtsStore>((set, get) => ({
     controller = ac;
 
     try {
-      audioDiag(`speak() chamado: pedindo síntese (${trimmed.length} caracteres)`);
       const blob = await synthesizeSpeech(trimmed, { signal: ac.signal });
-      if (mine !== token) {
-        audioDiag('áudio recebido, mas descartado: outra fala começou');
-        return;
-      }
-      audioDiag(`áudio recebido: ${blob.type || 'sem tipo'}, ${blob.size} bytes`);
+      if (mine !== token) return;
 
       const url = URL.createObjectURL(blob);
       objectUrl = url;
       const el = getPlayer();
       audio = el;
       el.src = url;
-      audioDiag(`src definido (elemento desbloqueado: ${unlocked ? 'sim' : 'não'})`);
       void computeEnvelope(blob, mine);
 
       el.onended = () => {
         if (mine !== token) return;
-        audioDiag('evento ended: fala terminou');
         teardown();
         set({ state: 'idle', speakingId: null });
       };
       el.onerror = () => {
         if (mine !== token) return;
-        audioDiagMediaError(el);
         teardown();
         set({ state: 'idle', speakingId: null, error: 'Playback failed', errorId: id });
       };
 
-      try {
-        audioDiag(`play() chamado (AudioContext: ${audioContext?.state ?? 'nenhum'})`);
-        await el.play();
-        audioDiagOk('audio.play()');
-      } catch (playErr) {
-        audioDiagError('audio.play()', playErr);
-        throw playErr;
-      }
+      await el.play();
       if (mine === token) set({ state: 'speaking', speakingId: id });
     } catch (err) {
       if (mine !== token) return;
-      if (err instanceof DOMException && err.name === 'AbortError' && ac.signal.aborted) return;
+      if (err instanceof DOMException && err.name === 'AbortError') return;
       teardown();
       set({
         state: 'idle',

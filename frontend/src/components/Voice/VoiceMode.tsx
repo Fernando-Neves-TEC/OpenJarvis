@@ -7,7 +7,6 @@ import { useAppStore } from '../../lib/store';
 import { getAudioContext, getTtsLevel, useTtsStore } from '../../lib/tts';
 import { toSpeakableText } from '../../lib/message-text';
 import { VoiceActivityDetector, isMeaningfulTranscript, rmsLevel } from '../../lib/vad';
-import { audioDiag, audioDiagError, audioDiagOk } from '../../lib/audio-diag';
 
 type Phase =
   | 'starting'
@@ -128,17 +127,14 @@ export default function VoiceMode({ onSend, onClose }: VoiceModeProps) {
     await tts.ensureHealth();
     if (closedRef.current) return;
     if (useTtsStore.getState().available !== true) {
-      audioDiag('modo de voz: TTS indisponível, resposta não será falada');
       setNotice('Voice output is unavailable, so replies are shown but not spoken.');
       startListening();
       return;
     }
-    audioDiag('modo de voz: chamando speak()');
     await useTtsStore.getState().speak(id, text);
     if (closedRef.current) return;
     if (useTtsStore.getState().speakingId !== id) {
       // speak() gave up (synthesis failed or was interrupted) without playing.
-      audioDiag(`modo de voz: speak() terminou sem tocar (${useTtsStore.getState().error ?? 'sem erro'})`);
       if (phaseRef.current === 'speaking') startListening();
       return;
     }
@@ -237,11 +233,7 @@ export default function VoiceMode({ onSend, onClose }: VoiceModeProps) {
         setPhase('error');
         return;
       }
-      await ctx.resume().then(
-        () => audioDiagOk(`AudioContext.resume() estado=${ctx.state}`),
-        (err) => audioDiagError('AudioContext.resume()', err),
-      );
-      ctx.onstatechange = () => audioDiag(`AudioContext estado=${ctx.state}`);
+      await ctx.resume().catch(() => {});
       if (closedRef.current) return;
       const micAnalyser = ctx.createAnalyser();
       micAnalyser.fftSize = 1024;
