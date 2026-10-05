@@ -770,17 +770,29 @@ def create_connectors_router():
             )
 
         client_id, _ = creds
-        # Build callback URL pointing to our own server
-        base_url = str(request.base_url).rstrip("/")
-        callback_url = f"{base_url}/v1/connectors/{connector_id}/oauth/callback"
+        # Gmail is deliberately scoped independently from the other Google
+        # connectors. Its Desktop OAuth client uses a loopback redirect and
+        # receives only gmail.modify; other Google connectors keep the shared flow.
+        gmail_scoped = connector_id == "gmail"
+        if gmail_scoped:
+            callback_url = (
+                "http://127.0.0.1:8000/v1/connectors/gmail/oauth/callback"
+            )
+            oauth_scopes = ["https://www.googleapis.com/auth/gmail.modify"]
+        else:
+            base_url = str(request.base_url).rstrip("/")
+            callback_url = f"{base_url}/v1/connectors/{connector_id}/oauth/callback"
+            oauth_scopes = provider.scopes
 
         params = {
             "client_id": client_id,
             "redirect_uri": callback_url,
             "response_type": "code",
-            "scope": " ".join(provider.scopes),
+            "scope": " ".join(oauth_scopes),
             **provider.extra_auth_params,
         }
+        if gmail_scoped:
+            params["include_granted_scopes"] = "false"
         auth_url = f"{provider.auth_endpoint}?{urlencode(params)}"
 
         from fastapi.responses import RedirectResponse
@@ -836,8 +848,14 @@ def create_connectors_router():
             raise HTTPException(400, "No client credentials configured")
 
         client_id, client_secret = creds
-        base_url = str(request.base_url).rstrip("/")
-        redirect_uri = f"{base_url}/v1/connectors/{connector_id}/oauth/callback"
+        gmail_scoped = connector_id == "gmail"
+        if gmail_scoped:
+            redirect_uri = (
+                "http://127.0.0.1:8000/v1/connectors/gmail/oauth/callback"
+            )
+        else:
+            base_url = str(request.base_url).rstrip("/")
+            redirect_uri = f"{base_url}/v1/connectors/{connector_id}/oauth/callback"
 
         try:
             tokens = _exchange_token(
@@ -861,11 +879,15 @@ def create_connectors_router():
             "refresh_token": tokens.get("refresh_token", ""),
             "token_type": tokens.get("token_type", "Bearer"),
             "expires_in": tokens.get("expires_in", 3600),
+            "scope": tokens.get("scope", ""),
             "client_id": client_id,
             "client_secret": client_secret,
         }
 
-        for filename in provider.credential_files:
+        credential_files = (
+            ("gmail.json",) if gmail_scoped else provider.credential_files
+        )
+        for filename in credential_files:
             save_tokens(str(_CONNECTORS_DIR / filename), payload)
 
         # Clear cached instance so it picks up new credentials

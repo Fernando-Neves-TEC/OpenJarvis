@@ -194,7 +194,14 @@ class ApprovalStore:
         tier: str,
         ttl_hours: int = 24,
     ) -> PendingAction:
-        """Create and persist a new pending action."""
+        """Create and persist a new pending action.
+
+        Email archive/delete are security-sensitive mutations and are always
+        forced to high tier here, regardless of caller/model input.
+        """
+        if action_type in {"email_archive", "email_delete"}:
+            tier = TIER_HIGH
+
         now = datetime.now(timezone.utc)
         action = PendingAction(
             id=uuid.uuid4().hex[:12],

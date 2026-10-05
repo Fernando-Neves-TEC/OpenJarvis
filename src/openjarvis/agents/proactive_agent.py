@@ -486,8 +486,13 @@ class ProactiveAgent(ToolUsingAgent):
                 tier=tier,
             )
 
-            if tier == TIER_TRIVIAL or (
-                rule and rule.decision == DECISION_ALWAYS_APPROVE
+            email_mutation = action.action_type in {
+                "email_archive",
+                "email_delete",
+            }
+            if not email_mutation and (
+                action.tier == TIER_TRIVIAL
+                or (rule and rule.decision == DECISION_ALWAYS_APPROVE)
             ):
                 store.update_status(action.id, STATUS_APPROVED)
                 auto_approve_ids.append(action.id)
