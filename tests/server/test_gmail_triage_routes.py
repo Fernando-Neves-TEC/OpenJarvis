@@ -16,6 +16,8 @@ class FakeTriageService:
         self.session_key = session_key
         self.started = []
         self.commands = []
+        self.targeted_commands = []
+        self.snapshot_queries = []
         self.closed = False
         type(self).instances.append(self)
 
@@ -48,6 +50,23 @@ class FakeTriageService:
             "response": "Arquivado e verificado no Gmail.\n\n2 de 4.",
             "verified": True,
         }
+
+    def handle_targeted_user_action(self, command, *, fingerprint):
+        self.targeted_commands.append((command, fingerprint))
+        return {
+            "response": "2 mensagens arquivadas e verificadas no Gmail.\n\n3 de 4.",
+            "verified": True,
+        }
+
+    def handle_snapshot_query(self, text, *, fingerprint):
+        self.snapshot_queries.append((text, fingerprint))
+        if "Grupo Juliani" in text:
+            response = "Não encontrei no snapshot atual nenhuma mensagem correspondente."
+        elif "Quantas" in text:
+            response = "Restam 3 mensagens no snapshot atual."
+        else:
+            response = "Restam 3 mensagens no snapshot atual: Vercel — Subject."
+        return {"response": response}
 
     def close(self):
         self.closed = True

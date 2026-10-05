@@ -111,7 +111,9 @@ async def _maybe_handle_gmail_triage(
 
     from openjarvis.connectors.gmail_triage import (
         GmailTriageService,
+        classify_action_intent,
         classify_direct_command,
+        classify_snapshot_query,
         command_fingerprint,
         infer_triage_query,
         is_sequential_triage_request,
@@ -119,13 +121,24 @@ async def _maybe_handle_gmail_triage(
 
     start_request = is_sequential_triage_request(last_user)
     direct_action = classify_direct_command(last_user)
-    if not start_request and direct_action is None:
+    targeted_action = classify_action_intent(last_user)
+    snapshot_query = classify_snapshot_query(last_user)
+    if (
+        not start_request
+        and direct_action is None
+        and targeted_action is None
+        and snapshot_query is None
+    ):
         return None
 
     session_key = request_body.conversation_id or "default"
     service = GmailTriageService(session_key=session_key)
     try:
         content: str | None = None
+        fingerprint = command_fingerprint(
+            request_body.messages,
+            session_key=session_key,
+        )
         if start_request:
             query = infer_triage_query(last_user)
             current = await asyncio.to_thread(
@@ -134,16 +147,34 @@ async def _maybe_handle_gmail_triage(
             )
             content = service.render_current(current)
         elif direct_action is not None:
-            fingerprint = command_fingerprint(
-                request_body.messages,
-                session_key=session_key,
-            )
             cached = service.cached_response(fingerprint)
             if cached is not None:
                 content = cached
             elif service.has_active():
                 result = await asyncio.to_thread(
                     service.handle_direct_user_command,
+                    last_user,
+                    fingerprint=fingerprint,
+                )
+                content = str(result.get("response", ""))
+        elif targeted_action is not None and service.has_active():
+            cached = service.cached_response(fingerprint)
+            if cached is not None:
+                content = cached
+            else:
+                result = await asyncio.to_thread(
+                    service.handle_targeted_user_action,
+                    last_user,
+                    fingerprint=fingerprint,
+                )
+                content = str(result.get("response", ""))
+        elif snapshot_query is not None and service.has_active():
+            cached = service.cached_response(fingerprint)
+            if cached is not None:
+                content = cached
+            else:
+                result = await asyncio.to_thread(
+                    service.handle_snapshot_query,
                     last_user,
                     fingerprint=fingerprint,
                 )

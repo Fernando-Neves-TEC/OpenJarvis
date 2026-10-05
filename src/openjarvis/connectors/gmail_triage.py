@@ -108,37 +108,104 @@ def _compact(text: str, limit: int) -> tuple[str, bool]:
 
 
 def classify_direct_command(text: str) -> Optional[str]:
-    """Map a short direct user command to a deterministic triage action."""
+    """Map an unequivocal user command to a deterministic triage action.
+
+    Natural wrappers are accepted so a direct user order does not fall back to
+    the LLM merely because it was phrased conversationally. Advisory, doubtful
+    or negated wording is deliberately rejected.
+    """
     normalized = _normalize(text)
-    if not normalized or len(normalized) > 100:
+    if not normalized or len(normalized) > 180:
         return None
 
+    normalized = re.sub(r"[,.!?:;]+", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+
+    ambiguous_markers = (
+        "talvez",
+        "acho",
+        "acha",
+        "devo",
+        "deveria",
+        "seria melhor",
+        "o que voce acha",
+        "o que acha",
+        "sugere",
+        "sugerir",
+        "recomenda",
+        "recomendar",
+        "nao sei",
+        "em duvida",
+    )
+    if any(marker in normalized for marker in ambiguous_markers):
+        return None
+    if "nao" in normalized.split():
+        return None
+
+    tokens = normalized.split()
+    leading_fillers = {
+        "sim",
+        "ok",
+        "okay",
+        "certo",
+        "entao",
+        "por",
+        "favor",
+        "voce",
+        "vc",
+        "eu",
+        "quero",
+        "que",
+        "pode",
+        "poderia",
+        "vamos",
+    }
+    trailing_fillers = {
+        "este",
+        "esta",
+        "esse",
+        "essa",
+        "isso",
+        "ele",
+        "email",
+        "e-mail",
+        "mensagem",
+        "agora",
+        "por",
+        "favor",
+        "pra",
+        "para",
+        "mim",
+        "ta",
+    }
+
+    while tokens and tokens[0] in leading_fillers:
+        tokens.pop(0)
+    while tokens and tokens[-1] in trailing_fillers:
+        tokens.pop()
+
+    command = " ".join(tokens)
     exact = {
         "arquivar": _ACTION_ARCHIVE,
         "arquiva": _ACTION_ARCHIVE,
         "arquive": _ACTION_ARCHIVE,
-        "pode arquivar": _ACTION_ARCHIVE,
-        "arquive este": _ACTION_ARCHIVE,
-        "arquive este email": _ACTION_ARCHIVE,
-        "arquivar este": _ACTION_ARCHIVE,
-        "arquivar este email": _ACTION_ARCHIVE,
         "lixeira": _ACTION_TRASH,
         "apagar": _ACTION_TRASH,
         "apague": _ACTION_TRASH,
-        "pode apagar": _ACTION_TRASH,
-        "jogar na lixeira": _ACTION_TRASH,
-        "jogue na lixeira": _ACTION_TRASH,
         "excluir": _ACTION_TRASH,
         "exclua": _ACTION_TRASH,
         "mover para lixeira": _ACTION_TRASH,
         "mova para lixeira": _ACTION_TRASH,
         "mandar para lixeira": _ACTION_TRASH,
         "mande para lixeira": _ACTION_TRASH,
+        "mandar pra lixeira": _ACTION_TRASH,
+        "mande pra lixeira": _ACTION_TRASH,
+        "jogar na lixeira": _ACTION_TRASH,
+        "jogue na lixeira": _ACTION_TRASH,
+        "joga na lixeira": _ACTION_TRASH,
         "pular": _ACTION_SKIP,
         "pule": _ACTION_SKIP,
-        "pular este": _ACTION_SKIP,
         "manter": _ACTION_SKIP,
-        "manter este": _ACTION_SKIP,
         "deixar": _ACTION_SKIP,
         "deixe": _ACTION_SKIP,
         "proximo": _ACTION_SKIP,
@@ -151,7 +218,7 @@ def classify_direct_command(text: str) -> Optional[str]:
         "cancelar triagem": _ACTION_CANCEL,
         "encerrar triagem": _ACTION_CANCEL,
     }
-    return exact.get(normalized)
+    return exact.get(command)
 
 
 def infer_triage_query(text: str) -> str:
@@ -163,33 +230,125 @@ def infer_triage_query(text: str) -> str:
 
 
 def is_sequential_triage_request(text: str) -> bool:
-    """Recognize only strong, explicit requests for one-by-one email triage."""
+    """Recognize explicit mailbox review requests and route them to a snapshot.
+
+    A user does not need to say "um por vez". Reviewing the inbox is enough to
+    enter deterministic triage; the workflow itself presents and tracks items.
+    """
     normalized = _normalize(text)
     if not normalized:
         return False
-    email_signal = any(
+    mailbox_signal = any(
         token in normalized
-        for token in ("email", "e-mail", "emails", "e-mails", "caixa de entrada")
-    )
-    sequential_signal = any(
-        token in normalized
-        for token in ("um por vez", "um a um", "cada um", "cada email", "cada e-mail")
+        for token in (
+            "caixa de entrada",
+            "caixa de email",
+            "caixa de e-mail",
+            "inbox",
+            "emails",
+            "e-mails",
+            "meus emails",
+            "meus e-mails",
+        )
     )
     review_signal = any(
         token in normalized
         for token in (
             "olhar",
             "olhada",
+            "dar uma olhada",
             "ver",
+            "verificar",
             "revisar",
+            "revisasse",
             "revise",
             "revisa",
             "analisar",
+            "analise",
             "triagem",
             "o que fazer",
         )
     )
-    return email_signal and sequential_signal and review_signal
+    return mailbox_signal and review_signal
+
+
+def classify_action_intent(text: str) -> Optional[str]:
+    """Recognize an explicit archive/trash order even when it names targets."""
+    normalized = _normalize(text)
+    if not normalized or len(normalized) > 500:
+        return None
+    ambiguous = (
+        "talvez",
+        "acho",
+        "devo",
+        "deveria",
+        "o que voce acha",
+        "o que acha",
+        "sugere",
+        "recomenda",
+        "nao sei",
+        "em duvida",
+    )
+    if any(marker in normalized for marker in ambiguous):
+        return None
+    if "nao " in normalized or normalized.startswith("nao"):
+        return None
+
+    archive_terms = ("arquivar", "arquive", "arquiva")
+    trash_terms = (
+        "excluir",
+        "exclua",
+        "apagar",
+        "apague",
+        "lixeira",
+    )
+    archive_pos = max((normalized.rfind(t) for t in archive_terms), default=-1)
+    trash_pos = max((normalized.rfind(t) for t in trash_terms), default=-1)
+    if archive_pos < 0 and trash_pos < 0:
+        return None
+    if archive_pos >= 0 and trash_pos >= 0:
+        if "melhor dizendo" not in normalized and "corrigindo" not in normalized:
+            return None
+        return _ACTION_ARCHIVE if archive_pos > trash_pos else _ACTION_TRASH
+    return _ACTION_ARCHIVE if archive_pos >= 0 else _ACTION_TRASH
+
+
+def classify_snapshot_query(text: str) -> Optional[str]:
+    """Classify factual questions that must be answered from the live snapshot."""
+    normalized = _normalize(text)
+    if not normalized:
+        return None
+    if any(
+        phrase in normalized
+        for phrase in (
+            "quantas restam",
+            "quantos restam",
+            "quantas faltam",
+            "quantos faltam",
+            "quantas mensagens restam",
+        )
+    ):
+        return "remaining_count"
+    if any(
+        phrase in normalized
+        for phrase in (
+            "quais outras mensagens",
+            "quais mensagens restam",
+            "quais restam",
+            "o que mais tem",
+            "o que ainda tem",
+            "quais outras",
+        )
+    ):
+        return "remaining_list"
+    if any(
+        phrase in normalized
+        for phrase in ("detalhes", "conteudo", "conteúdo", "me fale mais", "me diga mais")
+    ) and any(
+        token in normalized for token in ("essa", "esse", "dessa", "desse", "do ", "da ")
+    ):
+        return "reference_details"
+    return None
 
 
 def command_fingerprint(
@@ -393,6 +552,129 @@ class GmailTriageStore:
             "status": row["status"],
             "action": row["action"],
         }
+
+    def all_items(
+        self,
+        session: TriageSession,
+        *,
+        pending_only: bool = False,
+    ) -> list[Dict[str, Any]]:
+        """Return snapshot items in stable position order."""
+        sql = "SELECT * FROM triage_items WHERE session_id = ?"
+        params: tuple[Any, ...] = (session.session_id,)
+        if pending_only:
+            sql += " AND status = ?"
+            params = (session.session_id, _ITEM_PENDING)
+        sql += " ORDER BY position"
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        return [
+            {
+                "position": int(row["position"]),
+                "message_id": row["message_id"],
+                "thread_id": row["thread_id"],
+                "sender": row["sender"],
+                "sender_domain": row["sender_domain"],
+                "subject": row["subject"],
+                "date": row["message_date"],
+                "snippet": row["snippet"],
+                "labels": json.loads(row["labels_json"] or "[]"),
+                "status": row["status"],
+                "action": row["action"],
+            }
+            for row in rows
+        ]
+
+    def hydrate_item(
+        self,
+        session: TriageSession,
+        position: int,
+        metadata: Dict[str, Any],
+    ) -> None:
+        """Persist metadata for any snapshot item without persisting its body."""
+        sender = str(metadata.get("sender", ""))
+        labels = list(metadata.get("labels", []))
+        with self._lock:
+            self._conn.execute(
+                """
+                UPDATE triage_items
+                SET thread_id = ?, sender = ?, sender_domain = ?,
+                    subject = ?, message_date = ?, snippet = ?, labels_json = ?
+                WHERE session_id = ? AND position = ?
+                """,
+                (
+                    str(metadata.get("thread_id", "")),
+                    sender,
+                    _sender_domain(sender),
+                    str(metadata.get("subject", "")),
+                    str(metadata.get("date", "")),
+                    str(metadata.get("snippet", "")),
+                    json.dumps(labels, ensure_ascii=False),
+                    session.session_id,
+                    int(position),
+                ),
+            )
+            self._conn.commit()
+
+    def mark_item_at(
+        self,
+        session: TriageSession,
+        position: int,
+        *,
+        status: str,
+        action: str,
+        verified: bool,
+    ) -> None:
+        with self._lock:
+            self._conn.execute(
+                """
+                UPDATE triage_items
+                SET status = ?, action = ?, verified_at = ?
+                WHERE session_id = ? AND position = ?
+                """,
+                (
+                    status,
+                    action,
+                    _utc_now() if verified else None,
+                    session.session_id,
+                    int(position),
+                ),
+            )
+            self._conn.commit()
+
+    def reposition_to_next_pending(self, session: TriageSession) -> TriageSession:
+        """Point at the first unresolved snapshot item or complete the session."""
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT MIN(position) AS position
+                FROM triage_items
+                WHERE session_id = ? AND status = ?
+                """,
+                (session.session_id, _ITEM_PENDING),
+            ).fetchone()
+            if row is not None and row["position"] is not None:
+                position = int(row["position"])
+                status = _STATUS_ACTIVE
+            else:
+                position = session.total
+                status = _STATUS_COMPLETED
+            self._conn.execute(
+                """
+                UPDATE triage_sessions
+                SET current_position = ?, status = ?, updated_at = ?
+                WHERE session_key = ? AND session_id = ?
+                """,
+                (
+                    position,
+                    status,
+                    _utc_now(),
+                    session.session_key,
+                    session.session_id,
+                ),
+            )
+            self._conn.commit()
+        return self.get_session(session.session_key)  # type: ignore[return-value]
 
     def hydrate_current(
         self,
@@ -707,6 +989,297 @@ class GmailTriageService:
             "suggestion": suggestion,
         }
 
+    def _ensure_snapshot_metadata(
+        self,
+        session: TriageSession,
+    ) -> list[Dict[str, Any]]:
+        """Hydrate headers/snippets for snapshot matching without downloading bodies."""
+        items = self.store.all_items(session)
+        for item in items:
+            if item.get("sender") and item.get("subject"):
+                continue
+            metadata = self.connector.get_message_metadata(item["message_id"])
+            self.store.hydrate_item(session, item["position"], metadata)
+        return self.store.all_items(session)
+
+    @staticmethod
+    def _reference_terms(text: str) -> set[str]:
+        normalized = _normalize(text)
+        tokens = set(re.findall(r"[a-z0-9]+", normalized))
+        stop = {
+            "a", "as", "o", "os", "um", "uma", "uns", "umas", "da", "das",
+            "de", "do", "dos", "e", "em", "no", "na", "nos", "nas", "para",
+            "pra", "por", "me", "mim", "voce", "vc", "essas", "esses", "essa",
+            "esse", "mensagem", "mensagens", "email", "emails", "pode", "podem",
+            "todos", "todas", "esse", "essa", "dessa", "desse", "arquivar",
+            "arquive", "arquiva", "excluir", "exclua", "apagar", "apague",
+            "lixeira", "agora", "ta", "ok", "sim", "melhor", "dizendo",
+        }
+        return {token for token in tokens if len(token) >= 4 and token not in stop}
+
+    def _match_snapshot_items(
+        self,
+        session: TriageSession,
+        text: str,
+        *,
+        pending_only: bool = True,
+    ) -> list[Dict[str, Any]]:
+        items = self._ensure_snapshot_metadata(session)
+        if pending_only:
+            items = [item for item in items if item["status"] == _ITEM_PENDING]
+        terms = self._reference_terms(text)
+        if not terms:
+            return []
+
+        normalized_text = _normalize(text)
+        matches: list[tuple[int, Dict[str, Any]]] = []
+        for item in items:
+            sender = str(item.get("sender", ""))
+            sender_name = _normalize(parseaddr(sender)[0])
+            domain = str(item.get("sender_domain", ""))
+            domain_root = domain.split(".")[-2] if "." in domain else domain
+            haystack = _normalize(
+                f"{sender} {domain} {item.get('subject', '')} {item.get('snippet', '')}"
+            )
+            hay_tokens = set(re.findall(r"[a-z0-9]+", haystack))
+            overlap = terms & hay_tokens
+            score = len(overlap)
+            if sender_name and len(sender_name) >= 4 and sender_name in normalized_text:
+                score += 5
+            if domain_root and len(domain_root) >= 4 and domain_root in terms:
+                score += 4
+            if score > 0:
+                matches.append((score, item))
+
+        if not matches:
+            return []
+        # Reference terms are already stripped of generic/action words, so any
+        # positive match is intentional enough for deterministic selection.
+        # This preserves multi-target phrases such as "pull request e Google".
+        return [item for score, item in matches if score > 0]
+
+    def _execute_item_action(
+        self,
+        session: TriageSession,
+        item: Dict[str, Any],
+        action: str,
+    ) -> tuple[bool, str]:
+        action_type = "email_archive" if action == _ACTION_ARCHIVE else "email_delete"
+        action_record = self.approval_store.queue_action(
+            action_type=action_type,
+            description=(
+                "Arquivar e-mail por comando direto do usuário"
+                if action == _ACTION_ARCHIVE
+                else "Mover e-mail para lixeira por comando direto do usuário"
+            ),
+            payload={
+                "message_id": item["message_id"],
+                "origin": "USER_DIRECT",
+                "triage_session_id": session.session_id,
+                "triage_position": item["position"],
+            },
+            permission_key=(
+                f"{action_type}:triage:{session.session_id}:{item['position']}"
+            ),
+            tier=TIER_HIGH,
+        )
+        if action_record.tier != TIER_HIGH or action_record.status != STATUS_PENDING:
+            raise GmailTriageError("Gate high/pending não foi aplicado.")
+
+        # The direct user request itself is the approval event.
+        self.approval_store.update_status(action_record.id, STATUS_APPROVED)
+        try:
+            if action == _ACTION_ARCHIVE:
+                self.connector.archive_message(item["message_id"])
+                labels = self.connector.get_message_labels(item["message_id"])
+                verified = "INBOX" not in labels
+                item_status = _ITEM_ARCHIVED
+                success = "arquivado"
+            else:
+                self.connector.delete_message(item["message_id"])
+                labels = self.connector.get_message_labels(item["message_id"])
+                verified = "TRASH" in labels
+                item_status = _ITEM_TRASHED
+                success = "movido para a lixeira"
+        except Exception:
+            self.approval_store.update_status(action_record.id, "execution_failed")
+            self.store.mark_item_at(
+                session,
+                item["position"],
+                status=_ITEM_ERROR,
+                action=action,
+                verified=False,
+            )
+            raise
+
+        if not verified:
+            self.approval_store.update_status(action_record.id, "verification_failed")
+            self.store.mark_item_at(
+                session,
+                item["position"],
+                status=_ITEM_ERROR,
+                action=action,
+                verified=False,
+            )
+            return False, "A validação do estado final no Gmail falhou."
+
+        self.approval_store.update_status(action_record.id, STATUS_EXECUTED)
+        self.store.mark_item_at(
+            session,
+            item["position"],
+            status=item_status,
+            action=action,
+            verified=True,
+        )
+        self.store.record_learning(
+            session,
+            item,
+            action=action,
+            origin="USER_DIRECT",
+        )
+        return True, success
+
+    def handle_targeted_user_action(
+        self,
+        command: str,
+        *,
+        fingerprint: str,
+    ) -> Dict[str, Any]:
+        session = self.store.active_session(self.session_key)
+        if session is None:
+            raise NoActiveTriage("Nenhuma triagem Gmail ativa.")
+        action = classify_action_intent(command)
+        if action is None:
+            raise GmailTriageError("Ação direta não reconhecida.")
+
+        matches = self._match_snapshot_items(session, command, pending_only=True)
+        if not matches:
+            response = (
+                "Não encontrei no snapshot atual nenhuma mensagem que corresponda "
+                "à referência informada. Nenhuma alteração foi feita."
+            )
+            self.store.remember_response(
+                session, fingerprint=fingerprint, response=response
+            )
+            return {"status": session.status, "verified": False, "response": response}
+
+        completed = 0
+        for item in matches:
+            verified, message = self._execute_item_action(session, item, action)
+            if not verified:
+                if completed == 0:
+                    progress = "Nenhuma ação foi confirmada como concluída."
+                else:
+                    progress = (
+                        f"{completed} de {len(matches)} ações tiveram resultado "
+                        "confirmado antes da falha."
+                    )
+                response = (
+                    f"{progress} {message} "
+                    "A execução foi interrompida sem declarar sucesso."
+                )
+                current_session = self.store.reposition_to_next_pending(session)
+                self.store.remember_response(
+                    current_session, fingerprint=fingerprint, response=response
+                )
+                return {
+                    "status": current_session.status,
+                    "verified": False,
+                    "completed": completed,
+                    "matched": len(matches),
+                    "response": response,
+                }
+            completed += 1
+
+        next_session = self.store.reposition_to_next_pending(session)
+        noun = "mensagem" if completed == 1 else "mensagens"
+        if action == _ACTION_ARCHIVE:
+            verb = "arquivada" if completed == 1 else "arquivadas"
+        else:
+            verb = "movida para a lixeira" if completed == 1 else "movidas para a lixeira"
+        verified_word = "verificada" if completed == 1 else "verificadas"
+        response = f"{completed} {noun} {verb} e {verified_word} no Gmail."
+        if next_session.status == _STATUS_ACTIVE:
+            response += "\n\n" + self.render_current(self.current())
+        else:
+            response += f"\n\nTriagem concluída: {session.total} de {session.total}."
+        self.store.remember_response(
+            next_session, fingerprint=fingerprint, response=response
+        )
+        return {
+            "status": next_session.status,
+            "verified": True,
+            "completed": completed,
+            "matched": len(matches),
+            "response": response,
+        }
+
+    def handle_snapshot_query(
+        self,
+        text: str,
+        *,
+        fingerprint: str,
+    ) -> Dict[str, Any]:
+        session = self.store.active_session(self.session_key)
+        if session is None:
+            raise NoActiveTriage("Nenhuma triagem Gmail ativa.")
+        query_type = classify_snapshot_query(text)
+        if query_type is None:
+            raise GmailTriageError("Consulta do snapshot não reconhecida.")
+
+        pending = self.store.all_items(session, pending_only=True)
+        if query_type == "remaining_count":
+            response = f"Restam {len(pending)} mensagens no snapshot atual."
+        elif query_type == "remaining_list":
+            items = self._ensure_snapshot_metadata(session)
+            items = [item for item in items if item["status"] == _ITEM_PENDING]
+            lines = [f"Restam {len(items)} mensagens no snapshot atual:"]
+            for item in items[:20]:
+                sender = parseaddr(item.get("sender", ""))[0] or item.get("sender", "")
+                lines.append(
+                    f"- {sender or '(remetente não informado)'} — "
+                    f"{item.get('subject') or '(sem assunto)'}"
+                )
+            if len(items) > 20:
+                lines.append(f"- ... e mais {len(items) - 20}.")
+            response = "\n".join(lines)
+        else:
+            matches = self._match_snapshot_items(session, text, pending_only=False)
+            if not matches:
+                response = (
+                    "Não encontrei no snapshot atual nenhuma mensagem que corresponda "
+                    "à referência informada."
+                )
+            elif len(matches) > 1:
+                lines = [
+                    f"Encontrei {len(matches)} mensagens correspondentes. "
+                    "Para evitar agir ou descrever a mensagem errada:"
+                ]
+                for item in matches[:10]:
+                    sender = parseaddr(item.get("sender", ""))[0] or item.get("sender", "")
+                    lines.append(
+                        f"- {sender or '(remetente não informado)'} — "
+                        f"{item.get('subject') or '(sem assunto)'}"
+                    )
+                response = "\n".join(lines)
+            else:
+                item = matches[0]
+                full = self.connector.get_message_content(item["message_id"])
+                body, truncated = _compact(full.get("body", ""), _DETAIL_BODY_CHARS)
+                response = "\n".join(
+                    [
+                        f"Remetente: {full.get('sender') or '(não informado)'}",
+                        f"Assunto: {full.get('subject') or '(sem assunto)'}",
+                        f"Conteúdo: {body or '(sem conteúdo textual)'}",
+                    ]
+                )
+                if truncated:
+                    response += "\nO conteúdo foi abreviado."
+        self.store.remember_response(
+            session, fingerprint=fingerprint, response=response
+        )
+        return {"status": session.status, "response": response}
+
     def handle_direct_user_command(
         self,
         command: str,
@@ -790,67 +1363,11 @@ class GmailTriageService:
                 "response": response,
             }
 
-        action_type = "email_archive" if action == _ACTION_ARCHIVE else "email_delete"
-        action_record = self.approval_store.queue_action(
-            action_type=action_type,
-            description=(
-                "Arquivar e-mail por comando direto do usuário"
-                if action == _ACTION_ARCHIVE
-                else "Mover e-mail para lixeira por comando direto do usuário"
-            ),
-            payload={
-                "message_id": item["message_id"],
-                "origin": "USER_DIRECT",
-                "triage_session_id": session.session_id,
-                "triage_position": session.current_position,
-            },
-            permission_key=f"{action_type}:triage:{session.session_id}:{session.current_position}",
-            tier=TIER_HIGH,
-        )
-        if action_record.tier != TIER_HIGH or action_record.status != STATUS_PENDING:
-            raise GmailTriageError("Gate high/pending não foi aplicado.")
-
-        # The authenticated direct user request is the approval event. The LLM
-        # cannot reach this path because it is not exposed as a tool.
-        self.approval_store.update_status(action_record.id, STATUS_APPROVED)
-
-        try:
-            if action == _ACTION_ARCHIVE:
-                self.connector.archive_message(item["message_id"])
-                labels = self.connector.get_message_labels(item["message_id"])
-                verified = "INBOX" not in labels
-                item_status = _ITEM_ARCHIVED
-                success_text = "Arquivado e verificado no Gmail."
-            else:
-                self.connector.delete_message(item["message_id"])
-                labels = self.connector.get_message_labels(item["message_id"])
-                verified = "TRASH" in labels
-                item_status = _ITEM_TRASHED
-                success_text = "Movido para a lixeira e verificado no Gmail."
-        except Exception:
-            self.approval_store.update_status(action_record.id, "execution_failed")
-            self.store.mark_item(
-                session,
-                status=_ITEM_ERROR,
-                action=action,
-                verified=False,
-            )
-            raise
-
+        verified, message = self._execute_item_action(session, item, action)
         if not verified:
-            self.approval_store.update_status(
-                action_record.id,
-                "verification_failed",
-            )
-            self.store.mark_item(
-                session,
-                status=_ITEM_ERROR,
-                action=action,
-                verified=False,
-            )
             response = (
-                "A ação foi enviada ao Gmail, mas a validação do estado final falhou. "
-                "A triagem permaneceu neste e-mail."
+                f"{message} A triagem permaneceu neste e-mail e nenhuma "
+                "confirmação de sucesso foi emitida."
             )
             self.store.remember_response(
                 session,
@@ -864,20 +1381,12 @@ class GmailTriageService:
                 "response": response,
             }
 
-        self.approval_store.update_status(action_record.id, STATUS_EXECUTED)
-        self.store.mark_item(
-            session,
-            status=item_status,
-            action=action,
-            verified=True,
+        next_session = self.store.reposition_to_next_pending(session)
+        success_text = (
+            "Arquivado e verificado no Gmail."
+            if action == _ACTION_ARCHIVE
+            else "Movido para a lixeira e verificado no Gmail."
         )
-        self.store.record_learning(
-            session,
-            item,
-            action=action,
-            origin="USER_DIRECT",
-        )
-        next_session = self.store.advance(session)
         response = self._after_action_response(success_text, next_session)
         self.store.remember_response(
             next_session,
@@ -950,7 +1459,9 @@ __all__ = [
     "GmailTriageService",
     "GmailTriageStore",
     "NoActiveTriage",
+    "classify_action_intent",
     "classify_direct_command",
+    "classify_snapshot_query",
     "command_fingerprint",
     "infer_triage_query",
     "is_sequential_triage_request",

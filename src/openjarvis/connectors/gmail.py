@@ -677,6 +677,21 @@ class GmailConnector(BaseConnector):
             )
         return items
 
+    def get_message_metadata(self, msg_id: str) -> Dict[str, Any]:
+        """Return headers/snippet/labels for one message without downloading its body."""
+        msg = self._call_with_refresh(_gmail_api_get_message_metadata, msg_id)
+        payload = msg.get("payload", {})
+        headers = payload.get("headers", [])
+        return {
+            "message_id": msg_id,
+            "thread_id": msg.get("threadId", ""),
+            "sender": _extract_header(headers, "From"),
+            "subject": _extract_header(headers, "Subject"),
+            "date": _extract_header(headers, "Date"),
+            "snippet": msg.get("snippet", ""),
+            "labels": list(msg.get("labelIds", [])),
+        }
+
     def get_message_content(self, msg_id: str) -> Dict[str, Any]:
         """Return the current message's human-readable content on demand."""
         msg = self._call_with_refresh(_gmail_api_get_message, msg_id)

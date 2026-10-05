@@ -8,7 +8,9 @@ import pytest
 from openjarvis.connectors.gmail_triage import (
     GmailTriageService,
     GmailTriageStore,
+    classify_action_intent,
     classify_direct_command,
+    classify_snapshot_query,
     command_fingerprint,
     infer_triage_query,
     is_sequential_triage_request,
@@ -65,6 +67,13 @@ class FakeConnector:
             }
             for item in items
         ]
+
+    def get_message_metadata(self, msg_id):
+        item = next(i for i in self.items if i["message_id"] == msg_id)
+        return {
+            **item,
+            "labels": list(self.labels[msg_id]),
+        }
 
     def get_message_content(self, msg_id):
         self.body_calls.append(msg_id)
