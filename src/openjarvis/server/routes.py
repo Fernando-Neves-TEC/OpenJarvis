@@ -116,6 +116,7 @@ async def _maybe_handle_gmail_triage(
         classify_snapshot_query,
         command_fingerprint,
         infer_triage_query,
+        is_pending_email_approval_reference,
         is_sequential_triage_request,
     )
 
@@ -123,11 +124,13 @@ async def _maybe_handle_gmail_triage(
     direct_action = classify_direct_command(last_user)
     targeted_action = classify_action_intent(last_user)
     snapshot_query = classify_snapshot_query(last_user)
+    pending_approval_ref = is_pending_email_approval_reference(last_user)
     if (
         not start_request
         and direct_action is None
         and targeted_action is None
         and snapshot_query is None
+        and not pending_approval_ref
     ):
         return None
 
@@ -139,7 +142,18 @@ async def _maybe_handle_gmail_triage(
             request_body.messages,
             session_key=session_key,
         )
-        if start_request:
+        if pending_approval_ref:
+            if targeted_action in {"archive", "trash"}:
+                result = await asyncio.to_thread(
+                    service.handle_pending_email_approval_action,
+                    last_user,
+                )
+            else:
+                result = await asyncio.to_thread(
+                    service.render_pending_email_approvals,
+                )
+            content = str(result.get("response", ""))
+        elif start_request:
             query = infer_triage_query(last_user)
             current = await asyncio.to_thread(
                 service.start,

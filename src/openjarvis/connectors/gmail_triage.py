@@ -330,6 +330,63 @@ def classify_action_intent(text: str) -> Optional[str]:
     return _ACTION_ARCHIVE if archive_pos >= 0 else _ACTION_TRASH
 
 
+def is_pending_email_approval_reference(text: str) -> bool:
+    """Recognize explicit references to the OpenJarvis email approval queue."""
+    normalized = _normalize(text)
+    if not normalized:
+        return False
+    markers = (
+        "aguardando aprovacao",
+        "pendente",
+        "pendentes",
+        "aprovacao",
+        "aprovacoes",
+        "sininho",
+        "aviso",
+        "avisos",
+    )
+    if any(_has_term(normalized, marker) for marker in markers):
+        return True
+
+    mailbox_waiting = _has_term(normalized, "aguardando") and any(
+        _has_term(normalized, term)
+        for term in ("email", "e-mail", "emails", "e-mails")
+    )
+    proposed_action = any(
+        _has_term(normalized, term)
+        for term in (
+            "arquivado",
+            "arquivados",
+            "arquivada",
+            "arquivadas",
+            "excluido",
+            "excluidos",
+            "excluida",
+            "excluidas",
+            "lixeira",
+        )
+    )
+    return mailbox_waiting and proposed_action
+
+
+def _is_collective_pending_reference(text: str) -> bool:
+    normalized = _normalize(text)
+    markers = (
+        "todos",
+        "todas",
+        "esses",
+        "essas",
+        "os dois",
+        "as duas",
+        "os tres",
+        "as tres",
+        "os três",
+        "as três",
+        "pendentes",
+    )
+    return any(_has_term(normalized, marker) for marker in markers)
+
+
 def classify_snapshot_query(text: str) -> Optional[str]:
     """Classify factual questions that must be answered from the live snapshot."""
     normalized = _normalize(text)
@@ -938,6 +995,164 @@ class GmailTriageService:
             return session.last_response
         return None
 
+    def pending_email_approvals(self) -> list[Any]:
+        """Return current pending Gmail mutation approvals."""
+        return [
+            action
+            for action in self.approval_store.list_pending()
+            if action.action_type in {"email_archive", "email_delete"}
+        ]
+
+    def render_pending_email_approvals(self) -> Dict[str, Any]:
+        """Render the approval bell from deterministic state, without message bodies."""
+        pending = self.pending_email_approvals()
+        if not pending:
+            return {
+                "count": 0,
+                "response": "Não há e-mails aguardando aprovação no OpenJarvis.",
+            }
+
+        lines = [
+            f"Há {len(pending)} "
+            + ("e-mail aguardando aprovação:" if len(pending) == 1 else "e-mails aguardando aprovação:")
+        ]
+        for index, action in enumerate(pending, 1):
+            payload = dict(action.payload or {})
+            message_id = str(payload.get("message_id", "")).strip()
+            sender = str(payload.get("sender", "")).strip()
+            subject = str(payload.get("subject", "")).strip()
+            if message_id and (not sender or not subject):
+                try:
+                    metadata = self.connector.get_message_metadata(message_id)
+                except Exception:
+                    metadata = {}
+                sender = sender or str(metadata.get("sender", "")).strip()
+                subject = subject or str(metadata.get("subject", "")).strip()
+            action_label = (
+                "Arquivar"
+                if action.action_type == "email_archive"
+                else "Mover para a lixeira"
+            )
+            sender_name = parseaddr(sender)[0] or sender or "(remetente não informado)"
+            lines.append(
+                f"{index}. {action_label} — {sender_name} — "
+                f"{subject or '(sem assunto)'}"
+            )
+        lines.append(
+            "Você pode aprovar/negá-los pelo sino ou dar uma ordem direta inequívoca."
+        )
+        return {"count": len(pending), "response": "\n".join(lines)}
+
+    def handle_pending_email_approval_action(self, command: str) -> Dict[str, Any]:
+        """Execute explicitly referenced pending e-mail approvals after Gmail verification."""
+        action = classify_action_intent(command)
+        if action not in {_ACTION_ARCHIVE, _ACTION_TRASH}:
+            raise GmailTriageError("Ação de aprovação pendente não reconhecida.")
+
+        pending = self.pending_email_approvals()
+        if not pending:
+            return {
+                "verified": True,
+                "completed": 0,
+                "response": "Não há e-mails aguardando aprovação no OpenJarvis.",
+            }
+        if len(pending) > 1 and not _is_collective_pending_reference(command):
+            return {
+                "verified": False,
+                "completed": 0,
+                "response": (
+                    f"Há {len(pending)} e-mails aguardando aprovação. "
+                    "Especifique qual deles ou diga explicitamente para agir em todos."
+                ),
+            }
+
+        expected_type = "email_archive" if action == _ACTION_ARCHIVE else "email_delete"
+        incompatible = [item for item in pending if item.action_type != expected_type]
+        if incompatible:
+            return {
+                "verified": False,
+                "completed": 0,
+                "response": (
+                    "As aprovações pendentes não correspondem todas à ação pedida. "
+                    "Nenhuma alteração foi feita; revise o sino antes de prosseguir."
+                ),
+            }
+
+        completed = 0
+        for approval in pending:
+            if approval.tier != TIER_HIGH or approval.status != STATUS_PENDING:
+                return {
+                    "verified": False,
+                    "completed": completed,
+                    "response": (
+                        "O estado da fila de aprovação mudou durante a execução. "
+                        "A operação foi interrompida sem declarar sucesso."
+                    ),
+                }
+            message_id = str(approval.payload.get("message_id", "")).strip()
+            if not message_id:
+                return {
+                    "verified": False,
+                    "completed": completed,
+                    "response": (
+                        "Uma aprovação pendente não possui ID interno de mensagem. "
+                        "A operação foi interrompida sem declarar sucesso."
+                    ),
+                }
+
+            labels_before = self.connector.get_message_labels(message_id)
+            already_verified = (
+                "INBOX" not in labels_before
+                if action == _ACTION_ARCHIVE
+                else "TRASH" in labels_before
+            )
+            if not already_verified:
+                self.approval_store.update_status(approval.id, STATUS_APPROVED)
+                try:
+                    if action == _ACTION_ARCHIVE:
+                        self.connector.archive_message(message_id)
+                    else:
+                        self.connector.delete_message(message_id)
+                    labels_after = self.connector.get_message_labels(message_id)
+                    verified = (
+                        "INBOX" not in labels_after
+                        if action == _ACTION_ARCHIVE
+                        else "TRASH" in labels_after
+                    )
+                except Exception:
+                    self.approval_store.update_status(approval.id, STATUS_PENDING)
+                    raise
+                if not verified:
+                    self.approval_store.update_status(approval.id, STATUS_PENDING)
+                    return {
+                        "verified": False,
+                        "completed": completed,
+                        "response": (
+                            f"{completed} de {len(pending)} ações tiveram resultado "
+                            "confirmado. A próxima não foi validada no Gmail; "
+                            "ela permanece pendente e nenhum sucesso foi declarado para ela."
+                        ),
+                    }
+
+            self.approval_store.update_status(approval.id, STATUS_EXECUTED)
+            completed += 1
+
+        noun = "e-mail" if completed == 1 else "e-mails"
+        result = (
+            "arquivado e verificado"
+            if action == _ACTION_ARCHIVE and completed == 1
+            else "arquivados e verificados"
+            if action == _ACTION_ARCHIVE
+            else "movido para a lixeira e verificado"
+            if completed == 1
+            else "movidos para a lixeira e verificados"
+        )
+        return {
+            "verified": True,
+            "completed": completed,
+            "response": f"{completed} {noun} {result} no Gmail. Aprovações pendentes: 0.",
+        }
+
     def start(
         self,
         *,
@@ -1493,5 +1708,6 @@ __all__ = [
     "classify_snapshot_query",
     "command_fingerprint",
     "infer_triage_query",
+    "is_pending_email_approval_reference",
     "is_sequential_triage_request",
 ]

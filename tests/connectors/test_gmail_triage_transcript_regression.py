@@ -75,6 +75,7 @@ class TranscriptConnector:
         }
         self.archive_calls: list[str] = []
         self.trash_calls: list[str] = []
+        self.body_calls: list[str] = []
 
     def list_message_stubs(self, *, query="", max_results=None):
         items = self.items if max_results is None else self.items[:max_results]
@@ -88,6 +89,7 @@ class TranscriptConnector:
         return {**item, "labels": list(self.labels[msg_id])}
 
     def get_message_content(self, msg_id):
+        self.body_calls.append(msg_id)
         item = next(x for x in self.items if x["message_id"] == msg_id)
         return {
             **item,

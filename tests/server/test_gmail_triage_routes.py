@@ -18,6 +18,8 @@ class FakeTriageService:
         self.commands = []
         self.targeted_commands = []
         self.snapshot_queries = []
+        self.pending_queries = []
+        self.pending_actions = []
         self.closed = False
         type(self).instances.append(self)
 
@@ -67,6 +69,21 @@ class FakeTriageService:
         else:
             response = "Restam 3 mensagens no snapshot atual: Vercel — Subject."
         return {"response": response}
+
+    def render_pending_email_approvals(self):
+        self.pending_queries.append(True)
+        return {
+            "count": 3,
+            "response": "Há 3 e-mails aguardando aprovação no OpenJarvis.",
+        }
+
+    def handle_pending_email_approval_action(self, command):
+        self.pending_actions.append(command)
+        return {
+            "verified": True,
+            "completed": 3,
+            "response": "3 e-mails arquivados e verificados no Gmail. Aprovações pendentes: 0.",
+        }
 
     def close(self):
         self.closed = True

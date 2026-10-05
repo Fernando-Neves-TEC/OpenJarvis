@@ -125,3 +125,55 @@ async def test_nonexistent_group_details_bypasses_llm():
     assert "Não encontrei no snapshot atual" in response.choices[0].message.content
     svc = FakeTriageService.instances[-1]
     assert len(svc.snapshot_queries) == 1
+
+
+@pytest.mark.asyncio
+async def test_pending_bell_question_bypasses_llm_without_starting_triage():
+    req = ChatCompletionRequest(
+        model="local",
+        messages=[
+            ChatMessage(
+                role="user",
+                content=(
+                    "Você viu que tem três e-mails aqui aguardando para serem "
+                    "arquivados ou excluídos?"
+                ),
+            )
+        ],
+        stream=False,
+        conversation_id="pending-bell",
+    )
+
+    response = await _maybe_handle_gmail_triage(req)
+
+    assert response is not None
+    assert response.usage.total_tokens == 0
+    assert "3 e-mails aguardando aprovação" in response.choices[0].message.content
+    svc = FakeTriageService.instances[-1]
+    assert svc.pending_queries == [True]
+    assert svc.started == []
+
+
+@pytest.mark.asyncio
+async def test_collective_pending_archive_bypasses_llm_and_needs_no_ids():
+    req = ChatCompletionRequest(
+        model="local",
+        messages=[
+            ChatMessage(
+                role="user",
+                content="Pode arquivar os três e-mails pendentes do sininho.",
+            )
+        ],
+        stream=False,
+        conversation_id="pending-bell",
+    )
+
+    response = await _maybe_handle_gmail_triage(req)
+
+    assert response is not None
+    assert response.usage.total_tokens == 0
+    assert "arquivados e verificados" in response.choices[0].message.content
+    svc = FakeTriageService.instances[-1]
+    assert svc.pending_actions == [
+        "Pode arquivar os três e-mails pendentes do sininho."
+    ]
