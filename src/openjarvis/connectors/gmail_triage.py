@@ -86,6 +86,23 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", ascii_text).strip(" .,!?:;\t\r\n")
 
 
+def _has_term(text: str, term: str) -> bool:
+    """Match a word or phrase without accepting substrings inside another word."""
+    return re.search(
+        rf"(?<!\w){re.escape(term)}(?!\w)",
+        text,
+    ) is not None
+
+
+def _last_term_position(text: str, terms: Iterable[str]) -> int:
+    """Return the last whole-term match position, or -1 when absent."""
+    position = -1
+    for term in terms:
+        for match in re.finditer(rf"(?<!\w){re.escape(term)}(?!\w)", text):
+            position = max(position, match.start())
+    return position
+
+
 def _sender_domain(sender: str) -> str:
     address = parseaddr(sender)[1].strip().lower()
     if "@" not in address:
@@ -239,8 +256,8 @@ def is_sequential_triage_request(text: str) -> bool:
     if not normalized:
         return False
     mailbox_signal = any(
-        token in normalized
-        for token in (
+        _has_term(normalized, term)
+        for term in (
             "caixa de entrada",
             "caixa de email",
             "caixa de e-mail",
@@ -252,8 +269,8 @@ def is_sequential_triage_request(text: str) -> bool:
         )
     )
     review_signal = any(
-        token in normalized
-        for token in (
+        _has_term(normalized, term)
+        for term in (
             "olhar",
             "olhada",
             "dar uma olhada",
@@ -302,8 +319,8 @@ def classify_action_intent(text: str) -> Optional[str]:
         "apague",
         "lixeira",
     )
-    archive_pos = max((normalized.rfind(t) for t in archive_terms), default=-1)
-    trash_pos = max((normalized.rfind(t) for t in trash_terms), default=-1)
+    archive_pos = _last_term_position(normalized, archive_terms)
+    trash_pos = _last_term_position(normalized, trash_terms)
     if archive_pos < 0 and trash_pos < 0:
         return None
     if archive_pos >= 0 and trash_pos >= 0:
