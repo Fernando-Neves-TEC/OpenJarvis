@@ -64,6 +64,7 @@ def _gmail_api_list_messages(
     *,
     page_token: Optional[str] = None,
     query: str = "",
+    max_results: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Call the Gmail ``messages.list`` endpoint.
 
@@ -87,6 +88,8 @@ def _gmail_api_list_messages(
         params["pageToken"] = page_token
     if query:
         params["q"] = query
+    if max_results is not None:
+        params["maxResults"] = str(max(1, min(int(max_results), 100)))
 
     resp = httpx.get(
         f"{_GMAIL_API_BASE}/messages",
@@ -149,6 +152,35 @@ def _gmail_api_get_message(token: str, msg_id: str) -> Dict[str, Any]:
         f"{_GMAIL_API_BASE}/messages/{msg_id}",
         headers={"Authorization": f"Bearer {token}"},
         params={"format": "full"},
+        timeout=30.0,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _gmail_api_get_message_metadata(token: str, msg_id: str) -> Dict[str, Any]:
+    """Fetch headers/snippet/labels without downloading the message body."""
+    resp = httpx.get(
+        f"{_GMAIL_API_BASE}/messages/{msg_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        params=[
+            ("format", "metadata"),
+            ("metadataHeaders", "From"),
+            ("metadataHeaders", "Subject"),
+            ("metadataHeaders", "Date"),
+        ],
+        timeout=30.0,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _gmail_api_get_message_minimal(token: str, msg_id: str) -> Dict[str, Any]:
+    """Fetch only Gmail resource metadata needed for post-action validation."""
+    resp = httpx.get(
+        f"{_GMAIL_API_BASE}/messages/{msg_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"format": "minimal"},
         timeout=30.0,
     )
     resp.raise_for_status()
@@ -561,6 +593,64 @@ class GmailConnector(BaseConnector):
                 raise
             token = self._refresh_token()
             return fn(token, *args, **kwargs)
+
+    def list_message_metadata(
+        self,
+        *,
+        query: str = "",
+        max_results: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """Return lightweight Gmail message metadata for deterministic triage.
+
+        Unlike :meth:`sync`, this method never downloads message bodies.
+        """
+        limit = max(1, min(int(max_results), 100))
+        response = self._call_with_refresh(
+            _gmail_api_list_messages,
+            query=query,
+            max_results=limit,
+        )
+        items: List[Dict[str, Any]] = []
+        for stub in response.get("messages", [])[:limit]:
+            msg_id = str(stub.get("id", ""))
+            if not msg_id:
+                continue
+            msg = self._call_with_refresh(_gmail_api_get_message_metadata, msg_id)
+            payload = msg.get("payload", {})
+            headers = payload.get("headers", [])
+            items.append(
+                {
+                    "message_id": msg_id,
+                    "thread_id": msg.get("threadId", ""),
+                    "sender": _extract_header(headers, "From"),
+                    "subject": _extract_header(headers, "Subject"),
+                    "date": _extract_header(headers, "Date"),
+                    "snippet": msg.get("snippet", ""),
+                    "labels": list(msg.get("labelIds", [])),
+                }
+            )
+        return items
+
+    def get_message_content(self, msg_id: str) -> Dict[str, Any]:
+        """Return the current message's human-readable content on demand."""
+        msg = self._call_with_refresh(_gmail_api_get_message, msg_id)
+        payload = msg.get("payload", {})
+        headers = payload.get("headers", [])
+        return {
+            "message_id": msg_id,
+            "thread_id": msg.get("threadId", ""),
+            "sender": _extract_header(headers, "From"),
+            "subject": _extract_header(headers, "Subject"),
+            "date": _extract_header(headers, "Date"),
+            "body": _decode_body(payload),
+            "snippet": msg.get("snippet", ""),
+            "labels": list(msg.get("labelIds", [])),
+        }
+
+    def get_message_labels(self, msg_id: str) -> List[str]:
+        """Return current labels using Gmail's minimal representation."""
+        msg = self._call_with_refresh(_gmail_api_get_message_minimal, msg_id)
+        return list(msg.get("labelIds", []))
 
     def delete_message(self, msg_id: str) -> None:
         """Move a message to Trash (recoverable for 30 days)."""

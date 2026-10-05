@@ -33,6 +33,132 @@ from openjarvis.server.models import (
 router = APIRouter()
 
 
+def _triage_nonstream_response(model: str, content: str) -> ChatCompletionResponse:
+    """OpenAI-compatible response for deterministic zero-LLM triage turns."""
+    return ChatCompletionResponse(
+        model=model,
+        choices=[
+            Choice(
+                message=ChoiceMessage(role="assistant", content=content),
+                finish_reason="stop",
+            )
+        ],
+        usage=UsageInfo(prompt_tokens=0, completion_tokens=0, total_tokens=0),
+    )
+
+
+def _triage_stream_response(model: str, content: str) -> StreamingResponse:
+    """SSE response for deterministic zero-LLM triage turns."""
+    chunk_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+
+    async def generate():
+        first = ChatCompletionChunk(
+            id=chunk_id,
+            model=model,
+            choices=[StreamChoice(delta=DeltaMessage(role="assistant"))],
+        )
+        yield f"data: {first.model_dump_json()}\n\n"
+
+        body = ChatCompletionChunk(
+            id=chunk_id,
+            model=model,
+            choices=[StreamChoice(delta=DeltaMessage(content=content))],
+        )
+        yield f"data: {body.model_dump_json()}\n\n"
+
+        finish = ChatCompletionChunk(
+            id=chunk_id,
+            model=model,
+            choices=[StreamChoice(delta=DeltaMessage(), finish_reason="stop")],
+        )
+        finish_dict = finish.model_dump()
+        finish_dict["usage"] = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+        }
+        finish_dict["deterministic"] = {"gmail_triage": True}
+        import json as _json
+
+        yield f"data: {_json.dumps(finish_dict)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
+
+
+async def _maybe_handle_gmail_triage(
+    request_body: ChatCompletionRequest,
+):
+    """Handle deterministic Gmail triage turns before invoking any LLM.
+
+    Only strong sequential-triage requests and short commands inside an active
+    triage are intercepted. Client-supplied tool requests are never intercepted.
+    """
+    if request_body.tools or not request_body.messages:
+        return None
+
+    last_user = ""
+    for message in reversed(request_body.messages):
+        if message.role == "user" and message.content:
+            last_user = message.content
+            break
+    if not last_user:
+        return None
+
+    from openjarvis.connectors.gmail_triage import (
+        GmailTriageService,
+        classify_direct_command,
+        command_fingerprint,
+        infer_triage_query,
+        is_sequential_triage_request,
+    )
+
+    start_request = is_sequential_triage_request(last_user)
+    direct_action = classify_direct_command(last_user)
+    if not start_request and direct_action is None:
+        return None
+
+    session_key = request_body.conversation_id or "default"
+    service = GmailTriageService(session_key=session_key)
+    try:
+        content: str | None = None
+        if start_request:
+            query = infer_triage_query(last_user)
+            current = await asyncio.to_thread(
+                service.start,
+                query=query,
+                max_results=20,
+            )
+            content = service.render_current(current)
+        elif direct_action is not None:
+            fingerprint = command_fingerprint(
+                request_body.messages,
+                session_key=session_key,
+            )
+            cached = service.cached_response(fingerprint)
+            if cached is not None:
+                content = cached
+            elif service.has_active():
+                result = await asyncio.to_thread(
+                    service.handle_direct_user_command,
+                    last_user,
+                    fingerprint=fingerprint,
+                )
+                content = str(result.get("response", ""))
+
+        if content is None:
+            return None
+        if request_body.stream:
+            return _triage_stream_response(request_body.model, content)
+        return _triage_nonstream_response(request_body.model, content)
+    finally:
+        service.close()
+
+
 def _to_messages(chat_messages) -> list[Message]:
     """Convert Pydantic ChatMessage objects to core Message objects."""
     messages = []
@@ -158,6 +284,10 @@ def _ensure_identity_prompt(messages: list[Message], app_config) -> list[Message
 @router.post("/v1/chat/completions")
 async def chat_completions(request_body: ChatCompletionRequest, request: Request):
     """Handle chat completion requests (streaming and non-streaming)."""
+    triage_response = await _maybe_handle_gmail_triage(request_body)
+    if triage_response is not None:
+        return triage_response
+
     engine = request.app.state.engine
     agent = getattr(request.app.state, "agent", None)
     model = request_body.model
