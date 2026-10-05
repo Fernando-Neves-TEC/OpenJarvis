@@ -114,7 +114,7 @@ def service(tmp_path: Path):
     approvals.close()
 
 
-def test_start_creates_fixed_snapshot_and_fetches_only_current_body(service):
+def test_start_creates_fixed_snapshot_without_fetching_message_body(service):
     svc, connector, _, _ = service
 
     current = svc.start(query="is:unread", max_results=20)
@@ -124,7 +124,7 @@ def test_start_creates_fixed_snapshot_and_fetches_only_current_body(service):
     assert current["remaining"] == 2
     assert current["subject"] == "First"
     assert connector.list_calls == 1
-    assert connector.body_calls == ["m1"]
+    assert connector.body_calls == []
 
     rendered = svc.render_current(current)
     assert "1 de 3." in rendered
@@ -230,7 +230,7 @@ def test_more_details_does_not_advance_or_modify(service):
     assert triage.active_session("default").current_position == before
     assert connector.archive_calls == []
     assert connector.trash_calls == []
-    assert connector.body_calls == ["m1", "m1"]
+    assert connector.body_calls == ["m1"]
 
 
 def test_skip_advances_and_records_behavior_without_gmail_mutation(service):

@@ -980,17 +980,25 @@ class GmailTriageService:
         if item is None:
             raise GmailTriageError("Snapshot inconsistente: item atual ausente.")
 
-        full = self.connector.get_message_content(item["message_id"])
-        self.store.hydrate_current(session, full)
+        if details:
+            hydrated = self.connector.get_message_content(item["message_id"])
+        else:
+            hydrated = self.connector.get_message_metadata(item["message_id"])
+        self.store.hydrate_current(session, hydrated)
         item = self.store.current_item(session)
         if item is None:
             raise GmailTriageError("Snapshot inconsistente após hidratação.")
 
-        body_limit = _DETAIL_BODY_CHARS if details else _DEFAULT_BODY_CHARS
-        body, truncated = _compact(
-            full.get("body") or item.get("snippet", ""),
-            body_limit,
-        )
+        if details:
+            content, truncated = _compact(
+                hydrated.get("body") or item.get("snippet", ""),
+                _DETAIL_BODY_CHARS,
+            )
+        else:
+            content, truncated = _compact(
+                hydrated.get("snippet") or item.get("snippet", ""),
+                _DEFAULT_BODY_CHARS,
+            )
         suggestion = self.store.learned_suggestion(item)
         return {
             "status": session.status,
@@ -1001,8 +1009,9 @@ class GmailTriageService:
             "sender": item["sender"],
             "subject": item["subject"],
             "date": item["date"],
-            "content": body,
+            "content": content,
             "content_truncated": truncated,
+            "details": details,
             "suggestion": suggestion,
         }
 
@@ -1438,15 +1447,18 @@ class GmailTriageService:
         total = current.get("total", 0)
         sender = current.get("sender") or "(remetente não informado)"
         subject = current.get("subject") or "(sem assunto)"
-        content = current.get("content") or "(sem conteúdo textual)"
+        is_details = bool(current.get("details")) or details
+        content = current.get("content") or (
+            "(sem conteúdo textual)" if is_details else "(sem resumo disponível)"
+        )
         lines = [
             f"{position} de {total}.",
             f"Remetente: {sender}",
             f"Assunto: {subject}",
-            f"Conteúdo: {content}",
+            f"{'Conteúdo' if is_details else 'Resumo'}: {content}",
         ]
-        if current.get("content_truncated") and not details:
-            lines.append("O conteúdo foi abreviado; diga “mais detalhes” para ampliar.")
+        if current.get("content_truncated") and is_details:
+            lines.append("O conteúdo foi abreviado.")
         suggestion = current.get("suggestion")
         if suggestion:
             action_labels = {
