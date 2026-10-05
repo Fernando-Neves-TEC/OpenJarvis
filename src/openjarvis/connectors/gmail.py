@@ -89,7 +89,7 @@ def _gmail_api_list_messages(
     if query:
         params["q"] = query
     if max_results is not None:
-        params["maxResults"] = str(max(1, min(int(max_results), 100)))
+        params["maxResults"] = str(max(1, min(int(max_results), 500)))
 
     resp = httpx.get(
         f"{_GMAIL_API_BASE}/messages",
@@ -593,6 +593,52 @@ class GmailConnector(BaseConnector):
                 raise
             token = self._refresh_token()
             return fn(token, *args, **kwargs)
+
+    def list_message_stubs(
+        self,
+        *,
+        query: str = "",
+        max_results: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return the complete lightweight ID snapshot for a Gmail query.
+
+        Only messages.list is used here. No individual message body or
+        metadata request is made, so even a large snapshot remains cheap.
+        """
+        limit = None if max_results is None else max(1, int(max_results))
+        page_token: Optional[str] = None
+        items: List[Dict[str, Any]] = []
+
+        while True:
+            remaining = None if limit is None else limit - len(items)
+            if remaining is not None and remaining <= 0:
+                break
+            page_size = 500 if remaining is None else min(500, remaining)
+            response = self._call_with_refresh(
+                _gmail_api_list_messages,
+                page_token=page_token,
+                query=query,
+                max_results=page_size,
+            )
+            for stub in response.get("messages", []):
+                msg_id = str(stub.get("id", ""))
+                if not msg_id:
+                    continue
+                items.append(
+                    {
+                        "message_id": msg_id,
+                        "thread_id": str(stub.get("threadId", "")),
+                    }
+                )
+                if limit is not None and len(items) >= limit:
+                    break
+
+            next_page = response.get("nextPageToken")
+            if not next_page or (limit is not None and len(items) >= limit):
+                break
+            page_token = str(next_page)
+
+        return items
 
     def list_message_metadata(
         self,

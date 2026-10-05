@@ -29,6 +29,42 @@ def _metadata(msg_id: str):
     }
 
 
+def test_list_message_stubs_paginates_ids_without_message_fetches(tmp_path: Path):
+    connector = _connector(tmp_path)
+    pages = [
+        {
+            "messages": [
+                {"id": "m1", "threadId": "t1"},
+                {"id": "m2", "threadId": "t2"},
+            ],
+            "nextPageToken": "next-1",
+        },
+        {
+            "messages": [{"id": "m3", "threadId": "t3"}],
+        },
+    ]
+
+    with (
+        patch(
+            "openjarvis.connectors.gmail._gmail_api_list_messages",
+            side_effect=pages,
+        ) as list_mock,
+        patch(
+            "openjarvis.connectors.gmail._gmail_api_get_message_metadata",
+        ) as metadata_mock,
+        patch("openjarvis.connectors.gmail._gmail_api_get_message") as full_mock,
+    ):
+        items = connector.list_message_stubs(query="in:inbox is:unread")
+
+    assert [item["message_id"] for item in items] == ["m1", "m2", "m3"]
+    assert list_mock.call_count == 2
+    assert list_mock.call_args_list[0].kwargs["page_token"] is None
+    assert list_mock.call_args_list[1].kwargs["page_token"] == "next-1"
+    assert list_mock.call_args_list[0].kwargs["max_results"] == 500
+    metadata_mock.assert_not_called()
+    full_mock.assert_not_called()
+
+
 def test_list_message_metadata_never_downloads_full_body(tmp_path: Path):
     connector = _connector(tmp_path)
 

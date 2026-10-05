@@ -19,7 +19,7 @@ class FakeTriageService:
         self.closed = False
         type(self).instances.append(self)
 
-    def start(self, *, query, max_results):
+    def start(self, *, query, max_results=None):
         self.started.append((query, max_results))
         return {
             "status": "active",
@@ -88,7 +88,7 @@ async def test_sequential_request_bypasses_llm_with_zero_token_response():
     assert response.choices[0].message.content.startswith("1 de 4.")
     svc = FakeTriageService.instances[-1]
     assert svc.session_key == "conv-a"
-    assert svc.started == [("in:inbox", 20)]
+    assert svc.started == [("in:inbox", None)]
     assert svc.closed is True
 
 
@@ -107,7 +107,7 @@ async def test_unread_request_uses_unread_snapshot():
     await _maybe_handle_gmail_triage(req)
 
     svc = FakeTriageService.instances[-1]
-    assert svc.started == [("is:unread", 20)]
+    assert svc.started == [("in:inbox is:unread", None)]
 
 
 @pytest.mark.asyncio

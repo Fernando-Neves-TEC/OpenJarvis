@@ -50,14 +50,21 @@ class FakeConnector:
         self.labels = {
             item["message_id"]: list(item["labels"]) for item in self.items
         }
-        self.metadata_calls = 0
+        self.list_calls = 0
         self.body_calls = []
         self.archive_calls = []
         self.trash_calls = []
 
-    def list_message_metadata(self, *, query="", max_results=20):
-        self.metadata_calls += 1
-        return [dict(item) for item in self.items[:max_results]]
+    def list_message_stubs(self, *, query="", max_results=None):
+        self.list_calls += 1
+        items = self.items if max_results is None else self.items[:max_results]
+        return [
+            {
+                "message_id": item["message_id"],
+                "thread_id": item["thread_id"],
+            }
+            for item in items
+        ]
 
     def get_message_content(self, msg_id):
         self.body_calls.append(msg_id)
@@ -107,7 +114,7 @@ def test_start_creates_fixed_snapshot_and_fetches_only_current_body(service):
     assert current["total"] == 3
     assert current["remaining"] == 2
     assert current["subject"] == "First"
-    assert connector.metadata_calls == 1
+    assert connector.list_calls == 1
     assert connector.body_calls == ["m1"]
 
     rendered = svc.render_current(current)
@@ -294,7 +301,10 @@ def test_intent_helpers_are_strict_and_query_scope_is_explicit():
     )
     assert is_sequential_triage_request(text) is True
     assert infer_triage_query(text) == "in:inbox"
-    assert infer_triage_query("mostre meus emails não lidos um por vez") == "is:unread"
+    assert (
+        infer_triage_query("mostre meus emails não lidos um por vez")
+        == "in:inbox is:unread"
+    )
 
     assert classify_direct_command("arquivar") == "archive"
     assert classify_direct_command("mover para lixeira") == "trash"

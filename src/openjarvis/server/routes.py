@@ -131,7 +131,6 @@ async def _maybe_handle_gmail_triage(
             current = await asyncio.to_thread(
                 service.start,
                 query=query,
-                max_results=20,
             )
             content = service.render_current(current)
         elif direct_action is not None:

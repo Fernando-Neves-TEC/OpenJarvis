@@ -132,6 +132,10 @@ def classify_direct_command(text: str) -> Optional[str]:
         "pular": _ACTION_SKIP,
         "pule": _ACTION_SKIP,
         "pular este": _ACTION_SKIP,
+        "manter": _ACTION_SKIP,
+        "manter este": _ACTION_SKIP,
+        "deixar": _ACTION_SKIP,
+        "deixe": _ACTION_SKIP,
         "proximo": _ACTION_SKIP,
         "proximo email": _ACTION_SKIP,
         "mais detalhes": _ACTION_DETAILS,
@@ -149,7 +153,7 @@ def infer_triage_query(text: str) -> str:
     """Infer only the mailbox scope; never infer an action."""
     normalized = _normalize(text)
     if any(token in normalized for token in ("nao lido", "nao lidos", "unread")):
-        return "is:unread"
+        return "in:inbox is:unread"
     return "in:inbox"
 
 
@@ -385,6 +389,36 @@ class GmailTriageStore:
             "action": row["action"],
         }
 
+    def hydrate_current(
+        self,
+        session: TriageSession,
+        metadata: Dict[str, Any],
+    ) -> None:
+        """Persist metadata for the current item without persisting its body."""
+        sender = str(metadata.get("sender", ""))
+        labels = list(metadata.get("labels", []))
+        with self._lock:
+            self._conn.execute(
+                """
+                UPDATE triage_items
+                SET thread_id = ?, sender = ?, sender_domain = ?,
+                    subject = ?, message_date = ?, snippet = ?, labels_json = ?
+                WHERE session_id = ? AND position = ?
+                """,
+                (
+                    str(metadata.get("thread_id", "")),
+                    sender,
+                    _sender_domain(sender),
+                    str(metadata.get("subject", "")),
+                    str(metadata.get("date", "")),
+                    str(metadata.get("snippet", "")),
+                    json.dumps(labels, ensure_ascii=False),
+                    session.session_id,
+                    session.current_position,
+                ),
+            )
+            self._conn.commit()
+
     def mark_item(
         self,
         session: TriageSession,
@@ -581,15 +615,15 @@ class GmailTriageService:
     def start(
         self,
         *,
-        query: str = "is:unread",
-        max_results: int = 20,
+        query: str = "in:inbox is:unread",
+        max_results: Optional[int] = None,
         force_restart: bool = False,
     ) -> Dict[str, Any]:
         existing = self.store.active_session(self.session_key)
         if existing and not force_restart:
             return self.current()
 
-        items = self.connector.list_message_metadata(
+        items = self.connector.list_message_stubs(
             query=query,
             max_results=max_results,
         )
@@ -621,6 +655,11 @@ class GmailTriageService:
             raise GmailTriageError("Snapshot inconsistente: item atual ausente.")
 
         full = self.connector.get_message_content(item["message_id"])
+        self.store.hydrate_current(session, full)
+        item = self.store.current_item(session)
+        if item is None:
+            raise GmailTriageError("Snapshot inconsistente após hidratação.")
+
         body_limit = _DETAIL_BODY_CHARS if details else _DEFAULT_BODY_CHARS
         body, truncated = _compact(
             full.get("body") or item.get("snippet", ""),
