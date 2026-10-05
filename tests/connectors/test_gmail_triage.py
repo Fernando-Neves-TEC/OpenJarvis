@@ -264,6 +264,46 @@ def test_behavioral_memory_suggests_but_does_not_execute(service):
     assert connector.trash_calls == []
 
 
+def test_learning_does_not_cross_contaminate_categories_on_same_domain(service):
+    svc, connector, triage, _ = service
+    svc.start(query="is:unread")
+    session = triage.active_session("default")
+    item = triage.current_item(session)
+
+    for _ in range(3):
+        triage.record_learning(
+            session,
+            item,
+            action="archive",
+            origin="USER_DIRECT",
+        )
+
+    promo_item = {
+        **item,
+        "message_id": "promo-regression",
+        "labels": ["INBOX", "CATEGORY_PROMOTIONS"],
+    }
+    for _ in range(3):
+        triage.record_learning(
+            session,
+            promo_item,
+            action="trash",
+            origin="USER_DIRECT",
+        )
+
+    current = svc.current()
+    assert current["suggestion"]["action"] == "archive"
+    assert current["suggestion"]["basis"] == "remetente + categoria"
+
+    unrelated_category = {
+        **item,
+        "labels": ["INBOX", "CATEGORY_SOCIAL"],
+    }
+    assert triage.learned_suggestion(unrelated_category) is None
+    assert connector.archive_calls == []
+    assert connector.trash_calls == []
+
+
 def test_verification_failure_does_not_advance_or_leave_approved(tmp_path: Path):
     class BrokenArchiveConnector(FakeConnector):
         def archive_message(self, msg_id):
@@ -307,7 +347,10 @@ def test_intent_helpers_are_strict_and_query_scope_is_explicit():
     )
 
     assert classify_direct_command("arquivar") == "archive"
+    assert classify_direct_command("arquiva") == "archive"
+    assert classify_direct_command("pode arquivar") == "archive"
     assert classify_direct_command("mover para lixeira") == "trash"
+    assert classify_direct_command("pode apagar") == "trash"
     assert classify_direct_command("mais detalhes") == "details"
     assert classify_direct_command("acho que talvez seja melhor arquivar") is None
 

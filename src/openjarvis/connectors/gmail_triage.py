@@ -35,8 +35,8 @@ _DEFAULT_SESSION_KEY = "default"
 _MAX_SESSION_KEY = 128
 _DEFAULT_BODY_CHARS = 3200
 _DETAIL_BODY_CHARS = 9000
-_LEARNING_DOMAIN_MIN = 3
-_LEARNING_CATEGORY_MIN = 5
+_LEARNING_PAIR_MIN = 3
+_LEARNING_DOMAIN_FALLBACK_MIN = 5
 _LEARNING_CONFIDENCE_MIN = 0.75
 
 _ACTION_ARCHIVE = "archive"
@@ -115,7 +115,9 @@ def classify_direct_command(text: str) -> Optional[str]:
 
     exact = {
         "arquivar": _ACTION_ARCHIVE,
+        "arquiva": _ACTION_ARCHIVE,
         "arquive": _ACTION_ARCHIVE,
+        "pode arquivar": _ACTION_ARCHIVE,
         "arquive este": _ACTION_ARCHIVE,
         "arquive este email": _ACTION_ARCHIVE,
         "arquivar este": _ACTION_ARCHIVE,
@@ -123,6 +125,9 @@ def classify_direct_command(text: str) -> Optional[str]:
         "lixeira": _ACTION_TRASH,
         "apagar": _ACTION_TRASH,
         "apague": _ACTION_TRASH,
+        "pode apagar": _ACTION_TRASH,
+        "jogar na lixeira": _ACTION_TRASH,
+        "jogue na lixeira": _ACTION_TRASH,
         "excluir": _ACTION_TRASH,
         "exclua": _ACTION_TRASH,
         "mover para lixeira": _ACTION_TRASH,
@@ -536,25 +541,47 @@ class GmailTriageStore:
             self._conn.commit()
 
     def learned_suggestion(self, item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Return a conservative suggestion learned from direct user decisions.
+
+        Prefer sender-domain + Gmail category so, for example, promotional
+        messages and security/update messages from the same provider do not
+        contaminate one another. Domain-only fallback requires more evidence.
+        Category-only learning is deliberately avoided because it is too broad.
+        """
         domain = item.get("sender_domain", "")
         category = _category(item.get("labels", []))
-        candidates = [
-            ("remetente", "sender_domain", domain, _LEARNING_DOMAIN_MIN),
-            ("categoria", "category", category, _LEARNING_CATEGORY_MIN),
-        ]
+
+        candidates: list[tuple[str, str, tuple[str, ...], int]] = []
+        if domain and category:
+            candidates.append(
+                (
+                    "remetente + categoria",
+                    "sender_domain = ? AND category = ?",
+                    (domain, category),
+                    _LEARNING_PAIR_MIN,
+                )
+            )
+        if domain:
+            candidates.append(
+                (
+                    "remetente",
+                    "sender_domain = ?",
+                    (domain,),
+                    _LEARNING_DOMAIN_FALLBACK_MIN,
+                )
+            )
+
         with self._lock:
-            for basis, column, value, minimum in candidates:
-                if not value:
-                    continue
+            for basis, where_clause, params, minimum in candidates:
                 rows = self._conn.execute(
                     f"""
                     SELECT action, COUNT(*) AS n
                     FROM triage_learning_events
-                    WHERE {column} = ?
+                    WHERE {where_clause}
                     GROUP BY action
                     ORDER BY n DESC, action
                     """,
-                    (value,),
+                    params,
                 ).fetchall()
                 total = sum(int(row["n"]) for row in rows)
                 if total < minimum or not rows:
@@ -570,7 +597,7 @@ class GmailTriageStore:
                     "total": total,
                     "confidence": round(confidence, 2),
                     "basis": basis,
-                    "value": value,
+                    "value": " / ".join(params),
                 }
         return None
 
