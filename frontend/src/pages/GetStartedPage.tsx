@@ -121,7 +121,7 @@ function CodeBlock({ code }: { code: string }) {
         onClick={handleCopy}
         className="absolute top-2 right-2 p-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
         style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}
-        title="Copy"
+        title="Copiar"
       >
         {copied ? <Check size={14} /> : <Copy size={14} />}
       </button>
@@ -205,7 +205,7 @@ function HostedView() {
         className="text-sm mb-6 leading-relaxed max-w-md mx-auto"
         style={{ color: 'var(--color-text-secondary)' }}
       >
-        Private AI that runs on your hardware. Chat, tools, agents, and
+        IA privada executada no seu hardware. Chat, ferramentas, agentes e
         energy profiling &mdash; no cloud required.
       </p>
 
@@ -213,7 +213,7 @@ function HostedView() {
         <div className="flex flex-col items-center gap-4">
           <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--color-accent)' }}>
             <CheckCircle2 size={16} />
-            <span>Server is running</span>
+            <span>O servidor está em execução</span>
           </div>
           <button
             onClick={() => navigate('/')}
@@ -223,7 +223,7 @@ function HostedView() {
             onMouseLeave={(e) => (e.currentTarget.style.opacity = '1')}
           >
             <MessageSquare size={18} />
-            Start Chatting
+            Começar a conversar
             <ArrowRight size={16} />
           </button>
         </div>
@@ -286,7 +286,7 @@ function DesktopView() {
       >
         <div className="flex items-center justify-center gap-2 mb-2" style={{ color: 'var(--color-accent)' }}>
           <CheckCircle2 size={18} />
-          <span className="text-sm font-medium">All systems running</span>
+          <span className="text-sm font-medium">Todos os sistemas estão em execução</span>
         </div>
         <p className="text-xs mb-5" style={{ color: 'var(--color-text-tertiary)' }}>
           Ollama inference engine, API server, and AI model are active.
@@ -299,17 +299,17 @@ function DesktopView() {
           onMouseLeave={(e) => (e.currentTarget.style.opacity = '1')}
         >
           <MessageSquare size={18} />
-          Start Chatting
+          Começar a conversar
           <ArrowRight size={16} />
         </button>
       </div>
 
       <div className="flex flex-col gap-3 mb-8">
-        <Section icon={Cpu} title="Keyboard Shortcuts" defaultOpen>
+        <Section icon={Cpu} title="Atalhos de teclado" defaultOpen>
           <div className="grid grid-cols-2 gap-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            <div><kbd className="font-mono px-1.5 py-0.5 rounded" style={{ background: 'var(--color-bg-tertiary)' }}>Cmd+K</kbd> Model picker</div>
-            <div><kbd className="font-mono px-1.5 py-0.5 rounded" style={{ background: 'var(--color-bg-tertiary)' }}>Cmd+I</kbd> System panel</div>
-            <div><kbd className="font-mono px-1.5 py-0.5 rounded" style={{ background: 'var(--color-bg-tertiary)' }}>Cmd+N</kbd> New chat</div>
+            <div><kbd className="font-mono px-1.5 py-0.5 rounded" style={{ background: 'var(--color-bg-tertiary)' }}>Cmd+K</kbd> Seletor de modelo</div>
+            <div><kbd className="font-mono px-1.5 py-0.5 rounded" style={{ background: 'var(--color-bg-tertiary)' }}>Cmd+I</kbd> Painel do sistema</div>
+            <div><kbd className="font-mono px-1.5 py-0.5 rounded" style={{ background: 'var(--color-bg-tertiary)' }}>Cmd+N</kbd> Nova conversa</div>
           </div>
         </Section>
       </div>
@@ -342,7 +342,7 @@ function SelfHostedView() {
           className="text-sm mb-4 leading-relaxed max-w-md mx-auto"
           style={{ color: 'var(--color-text-secondary)' }}
         >
-          Private AI that runs on your hardware. Chat, tools, agents, and
+          IA privada executada no seu hardware. Chat, ferramentas, agentes e
           energy profiling &mdash; no cloud required.
         </p>
         <span
@@ -402,7 +402,7 @@ function SelfHostedView() {
 
       {/* CLI + Browser sections */}
       <div className="flex flex-col gap-3 mb-10">
-        <Section icon={Terminal} title="Command Line (macOS / Linux)" defaultOpen>
+        <Section icon={Terminal} title="Linha de comando (macOS / Linux)" defaultOpen>
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
             Clone and install (Python 3.10+ required):
           </p>
@@ -413,7 +413,7 @@ function SelfHostedView() {
           <CodeBlock code={"jarvis init\njarvis doctor\njarvis chat"} />
         </Section>
 
-        <Section icon={Globe} title="Browser App (Self-Hosted)">
+        <Section icon={Globe} title="Aplicativo no navegador (auto-hospedado)">
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
             Launch the API server to get the full UI in your browser:
           </p>
@@ -424,7 +424,7 @@ function SelfHostedView() {
           </p>
         </Section>
 
-        <Section icon={Globe} title="Docker (Cloud / VPS Deploy)">
+        <Section icon={Globe} title="Docker (implantação em nuvem / VPS)">
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
             Deploy with Docker Compose for a zero-setup hosted instance:
           </p>
@@ -449,15 +449,15 @@ function SelfHostedView() {
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
           <div>
-            <div className="font-medium mb-0.5" style={{ color: 'var(--color-text)' }}>Desktop App</div>
+            <div className="font-medium mb-0.5" style={{ color: 'var(--color-text)' }}>Aplicativo desktop</div>
             No prerequisites &mdash; everything is bundled
           </div>
           <div>
-            <div className="font-medium mb-0.5" style={{ color: 'var(--color-text)' }}>CLI / Self-Hosted</div>
+            <div className="font-medium mb-0.5" style={{ color: 'var(--color-text)' }}>CLI / Auto-hospedado</div>
             Python 3.10+ and an inference engine (Ollama recommended)
           </div>
           <div>
-            <div className="font-medium mb-0.5" style={{ color: 'var(--color-text)' }}>Memory</div>
+            <div className="font-medium mb-0.5" style={{ color: 'var(--color-text)' }}>Memória</div>
             8 GB+ RAM recommended
           </div>
         </div>

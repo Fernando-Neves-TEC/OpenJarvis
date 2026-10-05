@@ -25,14 +25,14 @@ interface VoiceModeProps {
 }
 
 const PHASE_LABEL: Record<Phase, string> = {
-  starting: 'Starting microphone…',
-  listening: 'Listening',
-  hearing: 'Listening',
-  transcribing: 'Transcribing…',
-  thinking: 'Thinking…',
-  speaking: 'Speaking',
-  paused: 'Paused — tap the orb to resume',
-  error: 'Microphone unavailable',
+  starting: 'Iniciando microfone…',
+  listening: 'Ouvindo',
+  hearing: 'Ouvindo',
+  transcribing: 'Transcrevendo…',
+  thinking: 'Pensando…',
+  speaking: 'Falando',
+  paused: 'Pausado — toque no orbe para retomar',
+  error: 'Microfone indisponível',
 };
 
 const ORB_MODE: Record<Phase, OrbMode> = {
@@ -127,7 +127,7 @@ export default function VoiceMode({ onSend, onClose }: VoiceModeProps) {
     await tts.ensureHealth();
     if (closedRef.current) return;
     if (useTtsStore.getState().available !== true) {
-      setNotice('Voice output is unavailable, so replies are shown but not spoken.');
+      setNotice('A saída de voz está indisponível; as respostas serão exibidas, mas não faladas.');
       startListening();
       return;
     }
@@ -334,7 +334,7 @@ export default function VoiceMode({ onSend, onClose }: VoiceModeProps) {
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Voice mode"
+      aria-label="Modo de voz"
       className="fixed inset-0 z-50 flex flex-col"
       style={{
         background: 'radial-gradient(ellipse at center, #0b1a2e 0%, #050a14 60%, #02040a 100%)',
@@ -347,8 +347,8 @@ export default function VoiceMode({ onSend, onClose }: VoiceModeProps) {
           type="button"
           onClick={onClose}
           className="p-2 rounded-full cursor-pointer transition-colors hover:bg-white/10"
-          title="Close voice mode (Esc)"
-          aria-label="Close voice mode"
+          title="Fechar modo de voz (Esc)"
+          aria-label="Fechar modo de voz"
         >
           <X size={20} />
         </button>
@@ -375,7 +375,7 @@ export default function VoiceMode({ onSend, onClose }: VoiceModeProps) {
         <div className="max-w-2xl w-full min-h-[4.5rem] text-sm leading-relaxed space-y-1">
           {youSaid && (
             <p style={{ color: '#9fb3d1' }}>
-              <span style={{ color: '#5f7ca6' }}>You: </span>
+              <span style={{ color: '#5f7ca6' }}>Você: </span>
               {youSaid}
             </p>
           )}
@@ -396,8 +396,8 @@ export default function VoiceMode({ onSend, onClose }: VoiceModeProps) {
             background: phase === 'paused' ? 'rgba(255,138,138,0.15)' : 'rgba(143,196,255,0.12)',
             border: `1px solid ${phase === 'paused' ? 'rgba(255,138,138,0.5)' : 'rgba(143,196,255,0.35)'}`,
           }}
-          title={phase === 'paused' ? 'Resume listening' : 'Pause listening'}
-          aria-label={phase === 'paused' ? 'Resume listening' : 'Pause listening'}
+          title={phase === 'paused' ? 'Retomar escuta' : 'Pausar escuta'}
+          aria-label={phase === 'paused' ? 'Retomar escuta' : 'Pausar escuta'}
         >
           {phase === 'paused' ? <MicOff size={20} /> : <Mic size={20} />}
         </button>

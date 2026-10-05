@@ -12,7 +12,7 @@ export function DashboardPage() {
         <header className="mb-6">
           <div className="flex items-center justify-between">
             <h1 className="text-lg font-semibold" style={{ color: 'var(--color-text)' }}>
-              System Overview
+              Visão geral do sistema
             </h1>
             <div className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
               {stamp}

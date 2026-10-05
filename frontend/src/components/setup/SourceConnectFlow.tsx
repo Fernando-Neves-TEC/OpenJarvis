@@ -231,7 +231,7 @@ function LocalPanel({
     <div className="flex flex-col gap-4">
       <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
         {displayName} reads data directly from your Mac. Make sure the app is installed and
-        Full Disk Access is granted to OpenJarvis in System Settings.
+        O Acesso Total ao Disco foi concedido ao OpenJarvis nas Configurações do Sistema.
       </p>
       <div
         className="px-4 py-3 rounded-lg text-sm"
@@ -240,7 +240,7 @@ function LocalPanel({
           color: 'var(--color-text-secondary)',
         }}
       >
-        <strong>System Settings</strong> → Privacy &amp; Security → Full Disk Access →
+        <strong>Configurações do Sistema</strong> → Privacy &amp; Security → Full Disk Access →
         enable OpenJarvis
       </div>
       <button

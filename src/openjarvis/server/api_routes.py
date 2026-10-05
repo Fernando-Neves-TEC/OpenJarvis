@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -1108,6 +1109,43 @@ async def _resolve_tts_backend(request: Request):
     return backend
 
 
+_TTS_ENGLISH_MARKERS = {
+    "the", "and", "to", "of", "for", "with", "you", "your", "is", "are",
+    "we", "this", "that", "in", "on", "from", "our", "was", "will", "can",
+    "have", "has", "more", "all", "new", "now", "thank", "today",
+}
+_TTS_PORTUGUESE_MARKERS = {
+    "a", "o", "as", "os", "de", "do", "da", "dos", "das", "e", "em",
+    "para", "por", "com", "que", "voce", "você", "seu", "sua", "uma",
+    "um", "nao", "não", "mais", "esta", "está", "agora", "como",
+}
+
+
+def _dominant_tts_language(text: str) -> str:
+    """Return 'en', 'pt', or '' using a deliberately conservative heuristic."""
+    tokens = re.findall(r"[A-Za-zÀ-ÿ']+", text.lower())
+    if len(tokens) < 8:
+        return ""
+    english = sum(token in _TTS_ENGLISH_MARKERS for token in tokens)
+    portuguese = sum(token in _TTS_PORTUGUESE_MARKERS for token in tokens)
+    if english >= 5 and english >= portuguese + 3:
+        return "en"
+    if portuguese >= 4 and portuguese >= english + 2:
+        return "pt"
+    return ""
+
+
+def _auto_tts_voice_for_text(backend, voice_id: str, text: str) -> str:
+    """Use an English Kokoro voice only for clearly English long-form text."""
+    if getattr(backend, "backend_id", "") != "kokoro":
+        return voice_id
+    if not voice_id.startswith("p"):
+        return voice_id
+    if _dominant_tts_language(text) == "en":
+        return "bm_george"
+    return voice_id
+
+
 def _tts_voice_and_speed(request: Request, backend) -> tuple[str, float]:
     """Resolve the voice ID and speed to use with *backend*.
 
@@ -1149,6 +1187,8 @@ async def synthesize_speech(request: Request, body: SpeechSynthesizeRequest):
     voice_id, speed = _tts_voice_and_speed(request, backend)
     if body.voice_id:
         voice_id = body.voice_id
+    else:
+        voice_id = _auto_tts_voice_for_text(backend, voice_id, text)
     if body.speed is not None:
         speed = body.speed
 

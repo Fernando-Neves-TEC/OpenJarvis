@@ -97,7 +97,7 @@ export function SystemPanel() {
           onClick={toggleSystemPanel}
           className="p-1 rounded-md transition-colors cursor-pointer"
           style={{ color: 'var(--color-text-tertiary)' }}
-          title="Close panel"
+          title="Fechar painel"
         >
           <X size={14} />
         </button>

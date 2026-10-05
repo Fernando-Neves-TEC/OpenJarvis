@@ -182,7 +182,7 @@ export function InputArea() {
     const content = (spoken ?? input).trim();
     if (!content || streamState.isStreaming) return;
     if (!selectedModel) {
-      toast.error('Pick a model first (⌘K)');
+      toast.error('Selecione um modelo primeiro (⌘K)');
       return;
     }
 
@@ -610,10 +610,10 @@ export function InputArea() {
               border: `1px solid ${deepResearch ? 'var(--color-accent)' : 'var(--color-border)'}`,
               color: deepResearch ? 'var(--color-accent)' : 'var(--color-text-tertiary)',
             }}
-            title={deepResearch ? 'Deep Research: on' : 'Deep Research: off'}
+            title={deepResearch ? 'Pesquisa aprofundada: ativada' : 'Pesquisa aprofundada: desativada'}
           >
             <Search size={12} />
-            Deep Research
+            Pesquisa aprofundada
           </button>
         </div>
         {deepResearch && corpusSync.syncing && corpusSync.itemsSynced > 0 && (
@@ -621,11 +621,11 @@ export function InputArea() {
             className="text-[11px] leading-snug"
             style={{ color: 'var(--color-text-tertiary)' }}
           >
-            Searching over{' '}
+            Pesquisando em{' '}
             <span key={corpusSync.itemsSynced} className="sync-bump" style={{ color: 'var(--color-text-secondary)' }}>
               {corpusSync.itemsSynced.toLocaleString()}
             </span>{' '}
-            items — sync in progress, results will improve as more data is indexed.
+            itens — sincronização em andamento; os resultados melhorarão conforme mais dados forem indexados.
           </div>
         )}
       </div>
@@ -642,7 +642,7 @@ export function InputArea() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={selectedModel ? 'Message OpenJarvis...' : 'Pick a model first (⌘K)...'}
+          placeholder={selectedModel ? 'Mensagem para o OpenJarvis...' : 'Selecione um modelo primeiro (⌘K)...'}
           rows={1}
           className="flex-1 bg-transparent outline-none resize-none text-sm leading-relaxed"
           style={{ color: 'var(--color-text)', maxHeight: '200px' }}
@@ -653,7 +653,7 @@ export function InputArea() {
             onClick={stopStreaming}
             className="p-2 rounded-xl transition-colors shrink-0 cursor-pointer"
             style={{ background: 'var(--color-error)', color: 'var(--color-on-accent)' }}
-            title="Stop generating"
+            title="Parar geração"
           >
             <Square size={16} />
           </button>
@@ -673,8 +673,8 @@ export function InputArea() {
                 setVoiceOpen(true);
               }}
               disabled={voiceDisabled}
-              title={speechAvailable ? 'Voice mode (hands-free conversation)' : 'Voice mode needs a speech-to-text backend'}
-              aria-label="Open voice mode"
+              title={speechAvailable ? 'Modo de voz (conversa sem usar as mãos)' : 'O modo de voz precisa de um backend de reconhecimento de fala'}
+              aria-label="Abrir modo de voz"
               className="p-2 rounded-xl transition-colors shrink-0 cursor-pointer disabled:opacity-30 disabled:cursor-default"
               style={{ color: 'var(--color-text-secondary)' }}
             >
@@ -683,7 +683,7 @@ export function InputArea() {
             <button
               onClick={() => sendMessage()}
               disabled={streamState.isStreaming || !input.trim() || modelLoading || !selectedModel}
-              title={selectedModel ? 'Send message' : 'Pick a model first (⌘K)'}
+              title={selectedModel ? 'Enviar mensagem' : 'Selecione um modelo primeiro (⌘K)'}
               className="p-2 rounded-xl transition-colors shrink-0 cursor-pointer disabled:opacity-30 disabled:cursor-default"
               style={{
                 background: input.trim() ? 'var(--color-accent)' : 'var(--color-bg-tertiary)',
@@ -697,8 +697,8 @@ export function InputArea() {
       </div>
       <div className="flex items-center justify-center mt-2 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
         <span>
-          <kbd className="font-mono">Enter</kbd> to send &middot;{' '}
-          <kbd className="font-mono">Shift+Enter</kbd> for new line
+          <kbd className="font-mono">Enter</kbd> para enviar &middot;{' '}
+          <kbd className="font-mono">Shift+Enter</kbd> para nova linha
         </span>
       </div>
       {voiceGate && !voiceOpen && (

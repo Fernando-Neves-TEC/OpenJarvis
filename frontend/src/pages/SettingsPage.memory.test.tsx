@@ -22,11 +22,11 @@ describe('Settings memory status', () => {
     );
 
     expect(failed).toContain('Missing Authorization header (HTTP 401)');
-    expect(failed).toContain('Retry');
-    expect(failed).toContain('Unavailable');
+    expect(failed).toContain('Tentar novamente');
+    expect(failed).toContain('Indisponível');
     expect(failed).not.toContain('Unable to reach memory service');
-    expect(recovered).toContain('sqlite backend — 3 entries');
-    expect(recovered).not.toContain('Retry');
+    expect(recovered).toContain('sqlite backend — 3 registros');
+    expect(recovered).not.toContain('Tentar novamente');
     expect(recovered).not.toContain('Missing Authorization header');
   });
 
@@ -38,8 +38,8 @@ describe('Settings memory status', () => {
       />,
     );
 
-    expect(html).toContain('Memory is not configured');
-    expect(html).toContain('Not configured');
-    expect(html).not.toContain('0 entries');
+    expect(html).toContain('A memória não está configurada');
+    expect(html).toContain('Não configurado');
+    expect(html).not.toContain('0 registros');
   });
 });

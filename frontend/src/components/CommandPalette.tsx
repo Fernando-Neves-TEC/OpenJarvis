@@ -270,9 +270,9 @@ export function CommandPalette() {
   };
 
   const TAB_LABELS: Record<Tab, string> = {
-    installed: `Installed Models (${models.length})`,
+    installed: `Modelos instalados (${models.length})`,
     catalogue: 'Download',
-    cloud: 'Cloud Models',
+    cloud: 'Modelos de nuvem',
   };
 
   return (
@@ -401,7 +401,7 @@ export function CommandPalette() {
                         disabled={isDeleting}
                         className="p-1 rounded transition-colors cursor-pointer"
                         style={{ color: 'var(--color-text-tertiary)', opacity: 0 }}
-                        title="Delete model"
+                        title="Excluir modelo"
                         onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.color = 'var(--color-error)'; }}
                         onMouseLeave={(e) => { e.currentTarget.style.opacity = '0'; e.currentTarget.style.color = 'var(--color-text-tertiary)'; }}
                       >
@@ -442,13 +442,13 @@ export function CommandPalette() {
                 );
               })}
               <div className="px-4 py-3 mt-1" style={{ borderTop: '1px solid var(--color-border)' }}>
-                <div className="text-[11px] mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Or enter any Ollama model name:</div>
+                <div className="text-[11px] mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Ou informe qualquer nome de modelo do Ollama:</div>
                 <div className="flex gap-2">
                   <input
                     type="text" value={customModel}
                     onChange={(e) => setCustomModel(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleCustomPull(); } }}
-                    placeholder="e.g. codellama:7b"
+                    placeholder="ex.: codellama:7b"
                     className="flex-1 text-sm px-3 py-1.5 rounded-lg outline-none"
                     style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text)', border: '1px solid var(--color-border)' }}
                   />
@@ -463,7 +463,7 @@ export function CommandPalette() {
               </div>
             </>
           ) : (
-            /* ── Cloud Models tab ── */
+            /* ── Modelos de nuvem tab ── */
             <div className="px-4 py-2">
               <div className="text-[11px] mb-3" style={{ color: 'var(--color-text-tertiary)' }}>
                 {desktopKeyStorage
@@ -499,7 +499,7 @@ export function CommandPalette() {
                           value={key}
                           onChange={(e) => setApiKeys((prev) => ({ ...prev, [provider.envKey]: e.target.value }))}
                           onBlur={() => handleKeyBlur(provider)}
-                          placeholder={hasSavedKey ? 'Saved in secure storage' : provider.envKey}
+                          placeholder={hasSavedKey ? 'Salvo em armazenamento seguro' : provider.envKey}
                           disabled={!desktopKeyStorage || isSaving}
                           className="flex-1 text-xs px-2 py-1.5 bg-transparent outline-none font-mono"
                           style={{ color: 'var(--color-text)' }}
@@ -571,11 +571,11 @@ export function CommandPalette() {
           {tab === 'installed' ? (
             <>
               <span><kbd className="font-mono">↑↓</kbd> Navigate</span>
-              <span><kbd className="font-mono">Enter</kbd> Select</span>
-              <span><kbd className="font-mono">Esc</kbd> Close</span>
+              <span><kbd className="font-mono">Enter</kbd> Selecionar</span>
+              <span><kbd className="font-mono">Esc</kbd> Fechar</span>
             </>
           ) : tab === 'catalogue' ? (
-            <span>Models are downloaded from the Ollama registry</span>
+            <span>Os modelos são baixados do registro do Ollama</span>
           ) : (
             <span>API keys are stored locally and never sent to OpenJarvis servers</span>
           )}

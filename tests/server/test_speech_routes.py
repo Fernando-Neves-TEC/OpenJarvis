@@ -384,3 +384,59 @@ def test_voice_id_not_reused_across_backends(mock_tts_backend):
 
     # Backend is mock_tts, not the configured kokoro, so bm_george must not leak.
     assert mock_tts_backend.synthesize.call_args.kwargs["voice_id"] != "bm_george"
+
+
+def _kokoro_pt_config():
+    return SimpleNamespace(
+        speech=SimpleNamespace(
+            tts_backend="kokoro",
+            voice_id="pf_dora",
+            voice_speed=1.0,
+            pronunciations={},
+        )
+    )
+
+
+def test_kokoro_pt_voice_switches_to_english_for_clearly_english_text(mock_tts_backend):
+    mock_tts_backend.backend_id = "kokoro"
+    client = _tts_app(mock_tts_backend, config=_kokoro_pt_config())
+    text = (
+        "Thank you for celebrating with us. We are shipping new features "
+        "for you and your team, and this update is available today."
+    )
+
+    response = client.post("/v1/speech/synthesize", json={"text": text})
+
+    assert response.status_code == 200
+    assert mock_tts_backend.synthesize.call_args.kwargs["voice_id"] == "bm_george"
+
+
+def test_kokoro_pt_voice_stays_portuguese_for_portuguese_text(mock_tts_backend):
+    mock_tts_backend.backend_id = "kokoro"
+    client = _tts_app(mock_tts_backend, config=_kokoro_pt_config())
+    text = (
+        "Boa tarde, Fernando. Esta mensagem está em português e foi preparada "
+        "para você com as informações que estão disponíveis agora."
+    )
+
+    response = client.post("/v1/speech/synthesize", json={"text": text})
+
+    assert response.status_code == 200
+    assert mock_tts_backend.synthesize.call_args.kwargs["voice_id"] == "pf_dora"
+
+
+def test_explicit_voice_override_wins_over_language_switch(mock_tts_backend):
+    mock_tts_backend.backend_id = "kokoro"
+    client = _tts_app(mock_tts_backend, config=_kokoro_pt_config())
+    text = (
+        "Thank you for celebrating with us. We are shipping new features "
+        "for you and your team, and this update is available today."
+    )
+
+    response = client.post(
+        "/v1/speech/synthesize",
+        json={"text": text, "voice_id": "af_heart"},
+    )
+
+    assert response.status_code == 200
+    assert mock_tts_backend.synthesize.call_args.kwargs["voice_id"] == "af_heart"

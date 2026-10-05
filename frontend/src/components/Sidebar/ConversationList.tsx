@@ -95,7 +95,7 @@ export function ConversationList({ searchQuery }: Props) {
               onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--color-text-tertiary)')}
               title={
                 isStreaming
-                  ? 'Stop generating before deleting this conversation'
+                  ? 'Pare a geração antes de excluir esta conversa'
                   : 'Delete conversation'
               }
             >

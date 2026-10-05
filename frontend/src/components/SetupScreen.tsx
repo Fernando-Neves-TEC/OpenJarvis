@@ -13,7 +13,7 @@ import { InferenceRecoveryButton, InferenceSourceSetup } from './InferenceSource
 
 const STEPS = [
   { key: 'ollama_ready', label: 'Inference Engine', icon: Cpu, detail: 'Starting Ollama...' },
-  { key: 'model_ready', label: 'AI Model', icon: Database, detail: 'Loading model...' },
+  { key: 'model_ready', label: 'Modelo de IA', icon: Database, detail: 'Carregando modelo...' },
   { key: 'server_ready', label: 'API Server', icon: Server, detail: 'Starting server...' },
 ] as const;
 

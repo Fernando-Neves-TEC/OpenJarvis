@@ -89,7 +89,7 @@ function CopyMessageButton({ content }: { content: string }) {
       onClick={handleCopy}
       className="p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
       style={{ color: 'var(--color-text-tertiary)' }}
-      title="Copy message"
+      title="Copiar mensagem"
     >
       {copied ? <Check size={14} /> : <Copy size={14} />}
     </button>
